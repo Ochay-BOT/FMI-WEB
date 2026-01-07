@@ -1,6 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+// Wajib biar aman dari static generation error
+export const dynamic = 'force-dynamic';
+
+import { useState, useEffect, Suspense } from 'react'; // <--- Tambah Suspense
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Save, ArrowLeft, Loader2, TrendingUp } from 'lucide-react';
@@ -13,9 +16,10 @@ const TABLE_OPTIONS = [
   { label: 'Downgrade Layanan', value: 'Downgrade 2026' },
 ];
 
-export default function CreateTrackerPage() {
+// --- BAGIAN 1: LOGIKA UTAMA DIPINDAH KE SINI ---
+function CreateTrackerContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const searchParams = useSearchParams(); // Hook penyebab error
   const subjectFromWO = searchParams.get('subject') || '';
 
   const [saving, setSaving] = useState(false);
@@ -30,9 +34,9 @@ export default function CreateTrackerPage() {
   });
 
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
   const [formData, setFormData] = useState({
     'TANGGAL': new Date().toISOString().split('T')[0],
@@ -53,6 +57,7 @@ export default function CreateTrackerPage() {
       
       if (!error && data) {
         // Helper untuk ambil Unique Values & Filter Null/Empty
+        // @ts-ignore
         const getUnique = (key) => [...new Set(data.map(item => item[key]).filter(x => x))];
 
         setOptions({
@@ -71,11 +76,11 @@ export default function CreateTrackerPage() {
     if(subjectFromWO) setFormData(prev => ({ ...prev, 'SUBJECT BERLANGGANAN': subjectFromWO }));
   }, [subjectFromWO]);
 
-  const handleChange = (e) => {
+  const handleChange = (e: any) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSave = async (e) => {
+  const handleSave = async (e: any) => {
     e.preventDefault();
     setSaving(true);
 
@@ -85,7 +90,7 @@ export default function CreateTrackerPage() {
       return;
     }
 
-    const payload = { ...formData };
+    const payload: any = { ...formData };
     if (selectedTable === 'Berlangganan 2026') delete payload['REASON'];
 
     const { error } = await supabase.from(selectedTable).insert([payload]);
@@ -122,120 +127,125 @@ export default function CreateTrackerPage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans">
-      <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg border border-slate-200 p-8">
+    <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg border border-slate-200 p-8">
+      
+      <div className="flex items-center gap-4 mb-8 border-b pb-6">
+        <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
+          <ArrowLeft size={24} />
+        </button>
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+            <TrendingUp className="text-emerald-600" /> Input Tracker Pelanggan
+          </h1>
+          <p className="text-sm text-slate-500">Pilih kategori transaksi</p>
+        </div>
+      </div>
+
+      <form onSubmit={handleSave} className="space-y-6">
         
-        <div className="flex items-center gap-4 mb-8 border-b pb-6">
-          <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
-            <ArrowLeft size={24} />
-          </button>
+        <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6">
+          <label className="block text-sm font-bold text-blue-800 mb-2">Pilih Kategori Transaksi</label>
+          <select 
+            value={selectedTable} 
+            onChange={(e) => setSelectedTable(e.target.value)}
+            className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-bold bg-white"
+          >
+            {TABLE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div>
-            <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-              <TrendingUp className="text-emerald-600" /> Input Tracker Pelanggan
-            </h1>
-            <p className="text-sm text-slate-500">Pilih kategori transaksi</p>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Tanggal</label>
+            <input type="date" name="TANGGAL" value={formData['TANGGAL']} onChange={handleChange}
+              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Status</label>
+            <input type="text" name="STATUS" value={formData['STATUS']} onChange={handleChange}
+              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 bg-slate-50" />
           </div>
         </div>
 
-        <form onSubmit={handleSave} className="space-y-6">
-          
-          <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6">
-            <label className="block text-sm font-bold text-blue-800 mb-2">Pilih Kategori Transaksi</label>
-            <select 
-              value={selectedTable} 
-              onChange={(e) => setSelectedTable(e.target.value)}
-              className="w-full p-3 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-blue-900 font-bold bg-white"
-            >
-              {TABLE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">Subject / Nama Pelanggan <span className="text-red-500">*</span></label>
+          <input type="text" name="SUBJECT BERLANGGANAN" value={formData['SUBJECT BERLANGGANAN']} onChange={handleChange} placeholder="Nama Customer / PT"
+            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 font-medium" />
+        </div>
+
+        {/* DROP DOWN GROUP 1 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">BTS</label>
+            <select name="BTS" value={formData['BTS']} onChange={handleChange} 
+              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
+              <option value="">- Pilih BTS -</option>
+              {options.bts.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
             </select>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Tanggal</label>
-              <input type="date" name="TANGGAL" value={formData['TANGGAL']} onChange={handleChange}
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Status</label>
-              <input type="text" name="STATUS" value={formData['STATUS']} onChange={handleChange}
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 bg-slate-50" />
-            </div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">ISP</label>
+            <select name="ISP" value={formData['ISP']} onChange={handleChange} 
+              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
+              <option value="">- Pilih ISP -</option>
+              {options.isp.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
+            </select>
           </div>
+        </div>
 
+        {/* DROP DOWN GROUP 2 */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Device / Perangkat</label>
+            <select name="DEVICE" value={formData['DEVICE']} onChange={handleChange} 
+              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
+              <option value="">- Pilih Device -</option>
+              {options.device.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
+            </select>
+          </div>
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Subject / Nama Pelanggan <span className="text-red-500">*</span></label>
-            <input type="text" name="SUBJECT BERLANGGANAN" value={formData['SUBJECT BERLANGGANAN']} onChange={handleChange} placeholder="Nama Customer / PT"
-              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 font-medium" />
+            <label className="block text-sm font-bold text-slate-700 mb-1">Team Pelaksana</label>
+            <select name="TEAM" value={formData['TEAM']} onChange={handleChange} 
+              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
+              <option value="">- Pilih Team -</option>
+              {options.team.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
+            </select>
           </div>
+        </div>
 
-          {/* DROP DOWN GROUP 1 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">BTS</label>
-              {/* PERBAIKAN: Menambahkan text-slate-700 */}
-              <select name="BTS" value={formData['BTS']} onChange={handleChange} 
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
-                <option value="">- Pilih BTS -</option>
-                {options.bts.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
-              </select>
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-1">Problem / Catatan</label>
+          <textarea name="PROBLEM" rows={2} value={formData['PROBLEM']} onChange={handleChange}
+            className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700"></textarea>
+        </div>
+
+        {selectedTable !== 'Berlangganan 2026' && (
+            <div className="bg-red-50 p-4 rounded-lg border border-red-100">
+              <label className="block text-sm font-bold text-red-700 mb-1">Alasan (Reason)</label>
+              <textarea name="REASON" rows={2} value={formData['REASON']} onChange={handleChange} placeholder="Kenapa berhenti/downgrade?"
+                className="w-full p-2.5 border border-red-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-slate-700"></textarea>
             </div>
-             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">ISP</label>
-              {/* PERBAIKAN: Menambahkan text-slate-700 */}
-              <select name="ISP" value={formData['ISP']} onChange={handleChange} 
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
-                <option value="">- Pilih ISP -</option>
-                {options.isp.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
-              </select>
-            </div>
-          </div>
+        )}
 
-          {/* DROP DOWN GROUP 2 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-             <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Device / Perangkat</label>
-              {/* PERBAIKAN: Menambahkan text-slate-700 */}
-              <select name="DEVICE" value={formData['DEVICE']} onChange={handleChange} 
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
-                <option value="">- Pilih Device -</option>
-                {options.device.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-1">Team Pelaksana</label>
-              {/* PERBAIKAN: Menambahkan text-slate-700 */}
-              <select name="TEAM" value={formData['TEAM']} onChange={handleChange} 
-                className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
-                <option value="">- Pilih Team -</option>
-                {options.team.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
-              </select>
-            </div>
-          </div>
+        <div className="pt-4 border-t border-slate-100">
+          <button type="submit" disabled={saving}
+            className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg disabled:bg-slate-300">
+            {saving ? <Loader2 className="animate-spin" /> : <Save size={20} />}
+            {saving ? 'Menyimpan...' : 'Simpan Tracker'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
 
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">Problem / Catatan</label>
-            <textarea name="PROBLEM" rows="2" value={formData['PROBLEM']} onChange={handleChange}
-              className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700"></textarea>
-          </div>
-
-          {selectedTable !== 'Berlangganan 2026' && (
-             <div className="bg-red-50 p-4 rounded-lg border border-red-100">
-                <label className="block text-sm font-bold text-red-700 mb-1">Alasan (Reason)</label>
-                <textarea name="REASON" rows="2" value={formData['REASON']} onChange={handleChange} placeholder="Kenapa berhenti/downgrade?"
-                  className="w-full p-2.5 border border-red-200 rounded-lg focus:ring-2 focus:ring-red-500 outline-none text-slate-700"></textarea>
-             </div>
-          )}
-
-          <div className="pt-4 border-t border-slate-100">
-            <button type="submit" disabled={saving}
-              className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg disabled:bg-slate-300">
-              {saving ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-              {saving ? 'Menyimpan...' : 'Simpan Tracker'}
-            </button>
-          </div>
-        </form>
-      </div>
+// --- BAGIAN 2: EXPORT DEFAULT (PEMBUNGKUS) ---
+export default function CreateTrackerPage() {
+  return (
+    <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans">
+      <Suspense fallback={<div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin text-emerald-600" /></div>}>
+        <CreateTrackerContent />
+      </Suspense>
     </div>
   );
 }
