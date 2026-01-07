@@ -1,22 +1,22 @@
 'use client';
 
 import { useState } from 'react';
-import { createBrowserClient } from '@supabase/ssr'; 
+import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
-import { Lock, Server, Loader2 } from 'lucide-react';
+import { Lock, Loader2, LogIn } from 'lucide-react';
 
 export default function LoginPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
-  const handleLogin = async (e) => {
+  const handleLogin = async (e: any) => {
     e.preventDefault();
     setLoading(true);
 
@@ -29,68 +29,61 @@ export default function LoginPage() {
       alert('Login Gagal: ' + error.message);
       setLoading(false);
     } else {
+      // Login Sukses, pindah ke dashboard
       router.push('/'); 
       router.refresh();
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden">
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 p-4 font-sans">
+      <div className="max-w-md w-full bg-white p-8 rounded-xl shadow-lg border border-slate-200">
         
-        {/* Header Biru */}
-        <div className="bg-blue-600 p-8 text-center">
-          <div className="mx-auto w-16 h-16 bg-white/20 rounded-xl flex items-center justify-center mb-4 backdrop-blur-sm shadow-inner">
-            <Server className="text-white" size={32} />
+        <div className="text-center mb-8">
+          <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="text-blue-600" size={32} />
           </div>
-          <h1 className="text-2xl font-bold text-white tracking-wide">NOC SYSTEM</h1>
-          <p className="text-blue-100 text-xs uppercase tracking-wider mt-1 font-medium">Authorized Personnel Only</p>
+          <h1 className="text-2xl font-bold text-slate-800">FiberMedia NOC</h1>
+          <p className="text-slate-500 text-sm mt-1">Silakan login untuk mengakses Tracker</p>
         </div>
 
-        {/* Form Input */}
-        <div className="p-8 pt-10">
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Email Staff</label>
-              <input 
-                type="email" 
-                required
-                // PERBAIKAN DI SINI: Tambah 'text-slate-900' agar tulisan berwarna gelap
-                className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-slate-900 placeholder:text-slate-400"
-                placeholder="admin@isp.net"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2">Password</label>
-              <div className="relative">
-                <input 
-                  type="password" 
-                  required
-                  // PERBAIKAN DI SINI JUGA: Tambah 'text-slate-900'
-                  className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all pl-10 text-slate-900 placeholder:text-slate-400"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <Lock className="absolute left-3 top-3.5 text-slate-400" size={18} />
-              </div>
-            </div>
+        <form onSubmit={handleLogin} className="space-y-5">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Email</label>
+            <input 
+              type="email" 
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="admin@fibermedia.co.id"
+              required
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-1">Password</label>
+            <input 
+              type="password" 
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              placeholder="••••••••"
+              required
+            />
+          </div>
 
-            <button 
-              type="submit" 
-              disabled={loading}
-              className="w-full bg-slate-900 text-white font-bold py-3 rounded-lg hover:bg-slate-800 transition-all flex justify-center items-center gap-2 shadow-lg disabled:opacity-70"
-            >
-              {loading ? <Loader2 className="animate-spin" size={20} /> : 'LOGIN SYSTEM'}
-            </button>
-          </form>
+          <button 
+            type="submit" 
+            disabled={loading}
+            className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg disabled:bg-slate-300"
+          >
+            {loading ? <Loader2 className="animate-spin" /> : <LogIn size={20} />}
+            {loading ? 'Memproses...' : 'Masuk Dashboard'}
+          </button>
+        </form>
 
-          <p className="text-center text-xs text-slate-400 mt-8">
-            PT. ISP NETWORK INDONESIA &copy; 2026
-          </p>
+        <div className="mt-6 text-center">
+            <p className="text-xs text-slate-400">Authorized Personnel Only</p>
         </div>
       </div>
     </div>
