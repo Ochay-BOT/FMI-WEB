@@ -9,6 +9,7 @@ import {
   TrendingUp, UserPlus, Server, Globe, Plus 
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 
 // Setup ApexCharts (No SSR)
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
@@ -24,9 +25,10 @@ const TABLE_MAP = {
 export default function TrackerPage() {
   // --- STATE UTAMA ---
   const [selectedCategory, setSelectedCategory] = useState('Pelanggan Baru');
-  const [dataList, setDataList] = useState<any[]>([]); // Tambah <any[]> untuk Vercel
+  const [dataList, setDataList] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [userRole, setUserRole] = useState<Role | null>(null);
    
   // State Modal Global Stats
   const [showModal, setShowModal] = useState(false);
@@ -45,9 +47,22 @@ export default function TrackerPage() {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   );
 
-  // --- 1. FETCH DATA UTAMA ---
+  // --- 1. FETCH DATA UTAMA & ROLE ---
   async function fetchData() {
     setLoading(true);
+    
+    // A. Ambil Role User
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      if(profile) setUserRole(profile.role as Role);
+    }
+
+    // B. Ambil Data Table
     const tableName = TABLE_MAP[selectedCategory as keyof typeof TABLE_MAP];
     
     const { data, error } = await supabase
@@ -155,6 +170,9 @@ export default function TrackerPage() {
     return subject.includes(s) || bts.includes(s) || team.includes(s);
   });
 
+  // LOGIKA RBAC: Cek izin input
+  const canInput = hasAccess(userRole, PERMISSIONS.TRACKER_INPUT);
+
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans">
       
@@ -174,11 +192,15 @@ export default function TrackerPage() {
           <button onClick={() => setShowModal(true)} className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 text-sm font-bold shadow-sm transition-all">
             <TrendingUp size={18} className="text-indigo-600" /> Global Stats
           </button>
-          <Link href="/tracker/create">
-            <button className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition shadow-lg shadow-emerald-200">
-              <Plus size={20} /> Input Baru
-            </button>
-          </Link>
+          
+          {/* TOMBOL INPUT BARU (Hanya untuk SUPER_DEV & AKTIVATOR) */}
+          {canInput && (
+            <Link href="/tracker/create">
+              <button className="flex items-center gap-2 px-5 py-2 bg-emerald-600 text-white rounded-lg font-bold hover:bg-emerald-700 transition shadow-lg shadow-emerald-200">
+                <Plus size={20} /> Input Baru
+              </button>
+            </Link>
+          )}
         </div>
       </div>
 

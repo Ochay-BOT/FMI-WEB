@@ -1,19 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { createBrowserClient } from '@supabase/ssr'; // Pakai library yang benar
+import { createBrowserClient } from '@supabase/ssr';
 import { Search, History, RefreshCcw, User, Clock, Trash2, PlusCircle, Edit, AlertCircle } from 'lucide-react';
 import { format, formatDistanceToNow } from 'date-fns';
 import { id as indonesia } from 'date-fns/locale';
 
 export default function LogActivityPage() {
-  // 1. SETUP SUPABASE SINGLETON (Fix Error Multiple Instance)
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs] = useState<any[]>([]); // Tambahkan tipe any[] untuk menghindari error mapping
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -32,7 +31,8 @@ export default function LogActivityPage() {
       .range(from, to);
 
     if (search) {
-      // Cari di kolom actor atau SUBJECT
+      // Cari di kolom actor atau SUBJECT menggunakan filter teks sederhana
+      // Catatan: .or() dengan ilike mungkin perlu setup index di Supabase untuk performa
       query = query.or(`actor.ilike.%${search}%,SUBJECT.ilike.%${search}%`);
     }
 
@@ -51,7 +51,7 @@ export default function LogActivityPage() {
   }, [page, search]); // Re-fetch jika halaman atau search berubah
 
   // Helper Warna Badge
-  const getActionStyle = (activity) => {
+  const getActionStyle = (activity: string) => {
     const act = (activity || '').toUpperCase();
     
     if (act.includes('DELETE') || act.includes('HAPUS')) 
@@ -113,22 +113,22 @@ export default function LogActivityPage() {
                   
                   {/* Timeline Dot */}
                   <div className={`absolute -left-[9px] top-3 w-4 h-4 rounded-full border-2 border-white shadow-sm flex items-center justify-center ${style.bg.split(' ')[0]}`}>
-                     <div className={`w-1.5 h-1.5 rounded-full ${style.text.replace('text', 'bg')}`}></div>
+                      <div className={`w-1.5 h-1.5 rounded-full ${style.text.replace('text', 'bg')}`}></div>
                   </div>
 
                   <div className="flex flex-col md:flex-row justify-between items-start gap-2">
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
-                         <span className="font-bold text-slate-700 text-sm flex items-center gap-1.5">
-                           <User size={14} className="text-slate-400"/> 
-                           {log.actor || 'System'}
-                         </span>
-                         
-                         {/* Badge Action */}
-                         <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase border flex items-center gap-1 ${style.bg} ${style.text}`}>
-                           <IconComponent size={10} />
-                           {style.label}
-                         </span>
+                          <span className="font-bold text-slate-700 text-sm flex items-center gap-1.5">
+                            <User size={14} className="text-slate-400"/> 
+                            {log.actor || 'System'}
+                          </span>
+                          
+                          {/* Badge Action */}
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase border flex items-center gap-1 ${style.bg} ${style.text}`}>
+                            <IconComponent size={10} />
+                            {style.label}
+                          </span>
                       </div>
                       <p className="text-slate-600 text-sm leading-relaxed font-medium">
                         {log.SUBJECT}
@@ -136,13 +136,13 @@ export default function LogActivityPage() {
                     </div>
                     
                     <div className="text-right flex-shrink-0">
-                       <div className="flex items-center justify-end gap-1 text-xs font-bold text-slate-500">
-                         <Clock size={12} />
-                         {log.created_at ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: indonesia }) : '-'}
-                       </div>
-                       <div className="text-[10px] text-slate-400 mt-0.5 font-medium">
-                         {log.created_at ? format(new Date(log.created_at), 'EEEE, dd MMM yyyy HH:mm', { locale: indonesia }) : '-'}
-                       </div>
+                        <div className="flex items-center justify-end gap-1 text-xs font-bold text-slate-500">
+                          <Clock size={12} />
+                          {log.created_at ? formatDistanceToNow(new Date(log.created_at), { addSuffix: true, locale: indonesia }) : '-'}
+                        </div>
+                        <div className="text-[10px] text-slate-400 mt-0.5 font-medium">
+                          {log.created_at ? format(new Date(log.created_at), 'EEEE, dd MMM yyyy HH:mm', { locale: indonesia }) : '-'}
+                        </div>
                     </div>
                   </div>
                 </div>

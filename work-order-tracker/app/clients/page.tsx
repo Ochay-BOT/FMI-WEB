@@ -5,50 +5,63 @@ import { createBrowserClient } from '@supabase/ssr';
 import Link from 'next/link';
 import { 
   Search, Plus, Filter, ChevronLeft, ChevronRight, 
-  MoreHorizontal, Users, Signal 
+  Users, Signal, Trash2, Edit 
 } from 'lucide-react';
+import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 
 export default function ClientListPage() {
   // --- STATE ---
-  const [clients, setClients] = useState([]);
+  const [clients, setClients] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [userRole, setUserRole] = useState<Role | null>(null);
   
   // State Pagination
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
-  const ITEMS_PER_PAGE = 10; // Jumlah data per halaman
+  const ITEMS_PER_PAGE = 10; 
 
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
-  // --- FETCH DATA (Canggih) ---
-  async function fetchClients() {
+  // --- 1. FETCH ROLE & DATA ---
+  async function fetchData() {
     setLoading(true);
 
-    // 1. Hitung Range Baris (misal Hal 1: baris 0-9, Hal 2: baris 10-19)
+    // A. Ambil Role User
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      if(profile) setUserRole(profile.role as Role);
+    }
+
+    // B. Hitung Range Baris Pagination
     const from = (page - 1) * ITEMS_PER_PAGE;
     const to = from + ITEMS_PER_PAGE - 1;
 
     let query = supabase
       .from('Data Client Corporate')
-      .select('*', { count: 'exact' }); // Minta total jumlah data juga
+      .select('*', { count: 'exact' }); 
 
-    // Jika ada pencarian, filter dulu
+    // Filter Search
     if (search) {
       query = query.or(`"Nama Pelanggan".ilike.%${search}%,"ID Pelanggan".ilike.%${search}%`);
     }
 
-    // Eksekusi dengan Range (Pagination)
+    // Eksekusi Query
     const { data, count, error } = await query
-      .order('id', { ascending: false }) // Data terbaru di atas
+      .order('id', { ascending: false }) 
       .range(from, to);
 
     if (error) {
-      console.error('Error:', error);
+      console.error('Error fetching clients:', error);
     } else {
       setClients(data || []);
       setTotalRecords(count || 0);
@@ -57,17 +70,21 @@ export default function ClientListPage() {
     setLoading(false);
   }
 
-  // Efek: Jalankan fetch saat Halaman ganti atau Search diketik
+  // Efek: Jalankan fetch saat Halaman ganti atau Search berubah
   useEffect(() => {
-    fetchClients();
+    fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [page, search]); 
 
-  // Reset ke halaman 1 jika user mengetik search baru
-  const handleSearch = (e) => {
+  // Reset ke halaman 1 saat search
+  const handleSearch = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
     setPage(1); 
   };
+
+  // --- LOGIKA RBAC ---
+  const canAdd = hasAccess(userRole, PERMISSIONS.CLIENT_ADD);           // NOC, Aktivator, Admin, Super Dev
+  const canEditDelete = hasAccess(userRole, PERMISSIONS.CLIENT_EDIT_DELETE); // Admin, Super Dev
 
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans">
@@ -81,18 +98,20 @@ export default function ClientListPage() {
           <p className="text-sm text-slate-500">Database pelanggan aktif & teknis</p>
         </div>
         
-        <Link href="/clients/create">
-          <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-500/30">
-            <Plus size={20} /> Client Baru
-          </button>
-        </Link>
+        {/* TOMBOL ADD CLIENT (PROTEKSI RBAC) */}
+        {canAdd && (
+          <Link href="/clients/create">
+            <button className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg font-bold hover:bg-blue-700 transition shadow-lg shadow-blue-500/30">
+              <Plus size={20} /> Client Baru
+            </button>
+          </Link>
+        )}
       </div>
 
       {/* FILTER & SEARCH BAR */}
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 flex flex-col md:flex-row justify-between gap-4">
         <div className="relative w-full md:w-96">
           <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
-          {/* PERBAIKAN: Menambahkan text-slate-700 */}
           <input 
             type="text" 
             placeholder="Cari Nama / ID Pelanggan..." 
@@ -124,7 +143,7 @@ export default function ClientListPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                // Skeleton Loading (Biar Keren)
+                // Skeleton Loading
                 [...Array(5)].map((_, i) => (
                   <tr key={i} className="animate-pulse">
                     <td className="px-6 py-4"><div className="h-4 bg-slate-200 rounded w-16"></div></td>
@@ -156,21 +175,37 @@ export default function ClientListPage() {
                       <StatusBadge status={client['STATUS']} />
                     </td>
                     <td className="px-6 py-4 text-center">
-                       {/* Indikator Sinyal Warna-Warni */}
                        <SignalIndicator value={client['RX ONT/SFP']} />
                     </td>
+                    
+                    {/* ACTION BUTTONS */}
                     <td className="px-6 py-4 text-center">
-                      <Link href={`/clients/${client.id}`}>
-                        <button className="text-blue-600 hover:bg-blue-100 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold mx-auto">
-                           Detail <ChevronRight size={14} />
-                        </button>
-                      </Link>
+                      <div className="flex justify-center items-center gap-2">
+                        {/* Detail Link (Semua bisa akses) */}
+                        <Link href={`/clients/${client.id}`}>
+                          <button className="text-blue-600 hover:bg-blue-100 p-2 rounded-lg transition-colors flex items-center gap-1 text-xs font-bold">
+                             Detail <ChevronRight size={14} />
+                          </button>
+                        </Link>
+
+                        {/* Edit & Delete (Hanya Admin & Super Dev) */}
+                        {canEditDelete && (
+                          <>
+                            <button className="p-2 text-amber-500 hover:bg-amber-50 rounded transition border border-transparent hover:border-amber-200" title="Edit">
+                              <Edit size={14} />
+                            </button>
+                            <button className="p-2 text-rose-500 hover:bg-rose-50 rounded transition border border-transparent hover:border-rose-200" title="Hapus">
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
               ) : (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-slate-400">
+                  <td colSpan={6} className="p-8 text-center text-slate-400">
                     Tidak ada data ditemukan.
                   </td>
                 </tr>
@@ -179,7 +214,7 @@ export default function ClientListPage() {
           </table>
         </div>
 
-        {/* PAGINATION CONTROLS (BAWAH) */}
+        {/* PAGINATION CONTROLS */}
         <div className="p-4 border-t border-slate-100 flex items-center justify-between bg-slate-50">
           <button 
             disabled={page === 1 || loading}
@@ -208,7 +243,7 @@ export default function ClientListPage() {
 
 // --- HELPER COMPONENTS ---
 
-function StatusBadge({ status }) {
+function StatusBadge({ status }: any) {
   const s = (status || '').toLowerCase();
   let color = 'bg-slate-100 text-slate-600 border-slate-200';
   
@@ -223,12 +258,12 @@ function StatusBadge({ status }) {
   );
 }
 
-function SignalIndicator({ value }) {
+function SignalIndicator({ value }: any) {
   const val = parseFloat(value);
   if (!value) return <span className="text-slate-300">-</span>;
 
   let color = 'text-green-600';
-  if (val < -27) color = 'text-red-500 animate-pulse'; // Sinyal jelek kedip-kedip
+  if (val < -27) color = 'text-red-500 animate-pulse'; 
   else if (val < -24) color = 'text-amber-500';
 
   return (

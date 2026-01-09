@@ -4,26 +4,27 @@ import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { 
   AlertTriangle, ChevronLeft, ChevronRight, 
-  Calendar, CheckCircle2, X, EyeOff, XCircle, CheckCircle, Loader2 
+  Calendar, CheckCircle2, X, XCircle, CheckCircle, Loader2, ShieldAlert 
 } from 'lucide-react';
 import { format, differenceInDays } from 'date-fns';
 import { id as indonesia } from 'date-fns/locale';
+import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 
 export default function AlertBanner() {
   const [alerts, setAlerts] = useState([]);
-  const [teamList, setTeamList] = useState([]); // State daftar team dari DB
+  const [teamList, setTeamList] = useState([]);
+  const [userRole, setUserRole] = useState<Role | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
   
-  // State untuk Modal & Processing
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [processingId, setProcessingId] = useState(null); // ID item yang sedang diproses
-  const [selectedTeams, setSelectedTeams] = useState({}); // Menyimpan pilihan team per item
+  const [processingId, setProcessingId] = useState(null);
+  const [selectedTeams, setSelectedTeams] = useState({});
 
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
   // --- HELPER: EKSTRAK TANGGAL ---
   const extractDateFromText = (text, defaultDate) => {
@@ -48,54 +49,72 @@ export default function AlertBanner() {
     return new Date(defaultDate);
   };
 
-  // --- 1. FETCH DATA (WO & TEAM) ---
+  // --- FETCH DATA (USER ROLE, WO & TEAM) ---
   async function fetchData() {
-    // A. Fetch WO Pending
-    const { data: woData } = await supabase
-      .from('Report Bulanan')
-      .select('*')
-      .in('STATUS', ['PENDING', 'PROGRESS', 'ON PROGRESS', 'OPEN'])
-      .order('id', { ascending: false });
+    try {
+      // A. Fetch User Role
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+        setUserRole(profile?.role as Role);
+      }
 
-    if (woData) setAlerts(woData);
+      // B. Fetch WO Pending
+      const { data: woData } = await supabase
+        .from('Report Bulanan')
+        .select('*')
+        .in('STATUS', ['PENDING', 'PROGRESS', 'ON PROGRESS', 'OPEN'])
+        .order('id', { ascending: false });
 
-    // B. Fetch Team List dari Table Index
-    const { data: teamData } = await supabase
-      .from('Index')
-      .select('TEAM')
-      .not('TEAM', 'is', null);
+      if (woData) setAlerts(woData);
 
-    if (teamData) {
-      const unique = [...new Set(teamData.map(t => t.TEAM))];
-      setTeamList(unique);
+      // C. Fetch Team List
+      const { data: teamData } = await supabase
+        .from('Index')
+        .select('TEAM')
+        .not('TEAM', 'is', null);
+
+      if (teamData) {
+        const unique = [...new Set(teamData.map(t => t.TEAM))];
+        setTeamList(unique);
+      }
+    } catch (err) {
+      console.error("Error fetching AlertBanner data:", err);
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   }
 
   useEffect(() => {
     fetchData();
   }, []);
 
-  // --- 2. LOGIC UPDATE STATUS (SELESAI / CANCEL) ---
+  // --- LOGIC UPDATE STATUS ---
   const handleUpdateStatus = async (id, actionType) => {
-    // Validasi Team (Wajib pilih team jika klik Selesai)
+    // SECURITY GATE: Cek role lagi sebelum eksekusi database
+    if (!hasAccess(userRole, PERMISSIONS.OVERVIEW_ACTION)) {
+      alert("Anda tidak memiliki izin untuk melakukan aksi ini.");
+      return;
+    }
+
     const teamName = selectedTeams[id];
-    
     if (actionType === 'SOLVED' && !teamName) {
       alert('Mohon pilih Team Eksekutor terlebih dahulu!');
       return;
     }
 
-    setProcessingId(id); // Mulai loading di tombol
-
-    const todayDate = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    setProcessingId(id);
+    const todayDate = new Date().toISOString().split('T')[0];
     
     const payload = {
-      'STATUS': actionType, // SOLVED atau CANCEL
+      'STATUS': actionType,
       'KETERANGAN': actionType === 'SOLVED' ? 'DONE' : 'CANCELLED BY SYSTEM',
       'SELESAI ACTION': todayDate,
-      'NAMA TEAM': teamName || 'System' // Default system jika cancel tanpa team
+      'NAMA TEAM': teamName || 'System'
     };
 
     const { error } = await supabase
@@ -106,21 +125,17 @@ export default function AlertBanner() {
     if (error) {
       alert('Gagal update: ' + error.message);
     } else {
-      // Refresh Data Lokal (Hapus item dari list alert)
       setAlerts(prev => prev.filter(item => item.id !== id));
-      
-      // Jika list habis, tutup modal
       if (alerts.length <= 1) setIsModalOpen(false);
     }
     setProcessingId(null);
   };
 
-  // Helper untuk handle perubahan dropdown team per item
   const handleTeamChange = (id, value) => {
     setSelectedTeams(prev => ({ ...prev, [id]: value }));
   };
 
-  // --- 3. AUTO SLIDE ---
+  // --- AUTO SLIDE ---
   useEffect(() => {
     if (alerts.length === 0 || isModalOpen) return;
     const interval = setInterval(() => {
@@ -132,10 +147,8 @@ export default function AlertBanner() {
   const nextSlide = () => setCurrentIndex((prev) => (prev + 1) % alerts.length);
   const prevSlide = () => setCurrentIndex((prev) => (prev - 1 + alerts.length) % alerts.length);
 
-  // --- RENDER UTAMA ---
   if (loading) return <div className="h-28 bg-white rounded-xl shadow-sm border border-slate-200 animate-pulse mb-8"></div>;
 
-  // JIKA AMAN (KOSONG)
   if (alerts.length === 0) {
     return (
       <div className="bg-white border border-emerald-100 p-6 rounded-xl shadow-sm mb-8 flex flex-col md:flex-row justify-between items-center gap-4 relative overflow-hidden">
@@ -171,7 +184,7 @@ export default function AlertBanner() {
 
   return (
     <>
-      {/* --- BANNER DEPAN (SLIDER) --- */}
+      {/* --- BANNER DEPAN --- */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 mb-8 relative overflow-hidden group">
         <div className="absolute top-0 left-0 w-1.5 h-full bg-rose-500"></div>
         <div className="p-6 flex flex-col md:flex-row items-center justify-between gap-6">
@@ -209,15 +222,15 @@ export default function AlertBanner() {
         <div className="absolute bottom-0 left-0 h-0.5 bg-rose-500 transition-all duration-500 ease-out" style={{ width: `${((currentIndex + 1) / alerts.length) * 100}%` }}></div>
       </div>
 
-      {/* --- MODAL DAFTAR LENGKAP (POPUP) --- */}
+      {/* --- MODAL POPUP --- */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm transition-all">
+        <div className="fixed inset-0 bg-black/50 z-[9999] flex items-center justify-center p-4 backdrop-blur-sm transition-all">
           <div className="bg-white w-full max-w-5xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col animate-in zoom-in-95 duration-200">
             
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
               <div>
                 <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><AlertTriangle className="text-rose-500" size={24} /> Daftar Peringatan Jadwal Eksekusi</h2>
-                <p className="text-sm text-slate-500 mt-1">Total {alerts.length} Work Order pending. Silakan update status jika sudah selesai.</p>
+                <p className="text-sm text-slate-500 mt-1">Total {alerts.length} Work Order pending.</p>
               </div>
               <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"><X size={24} /></button>
             </div>
@@ -239,9 +252,10 @@ export default function AlertBanner() {
                   if(st.includes('PENDING')) stColor = 'bg-amber-100 text-amber-700 border-amber-200';
 
                   const isProcessing = processingId === alert.id;
+                  const canAction = hasAccess(userRole, PERMISSIONS.OVERVIEW_ACTION);
 
                   return (
-                    <div key={alert.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row gap-4 items-start lg:items-center">
+                    <div key={alert.id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex flex-col lg:flex-row gap-4 items-start lg:items-center relative overflow-hidden">
                       
                       <div className="flex-1 w-full">
                         <div className="flex items-center gap-2 mb-2">
@@ -251,18 +265,20 @@ export default function AlertBanner() {
                         <h3 className="font-bold text-slate-800 text-lg leading-snug">{alert['SUBJECT WO']}</h3>
                         <p className="text-sm text-slate-500 mt-1 italic">"{alert['KETERANGAN'] || '-'}"</p>
                         
-                        {/* PILIH TEAM (DROPDOWN) */}
-                        <div className="mt-3 flex items-center gap-2">
-                           <span className="text-xs font-bold text-slate-500">Eksekutor:</span>
-                           <select 
-                             className="text-xs border border-slate-300 rounded px-2 py-1 bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none w-48 text-slate-700"
-                             value={selectedTeams[alert.id] || alert['NAMA TEAM'] || ''}
-                             onChange={(e) => handleTeamChange(alert.id, e.target.value)}
-                           >
-                             <option value="">- Pilih Team -</option>
-                             {teamList.map((t, i) => <option key={i} value={t}>{t}</option>)}
-                           </select>
-                        </div>
+                        {/* PILIH TEAM - HANYA MUNCUL JIKA PUNYA AKSES */}
+                        {canAction && (
+                          <div className="mt-3 flex items-center gap-2">
+                             <span className="text-xs font-bold text-slate-500">Eksekutor:</span>
+                             <select 
+                               className="text-xs border border-slate-300 rounded px-2 py-1 bg-slate-50 focus:ring-2 focus:ring-blue-500 outline-none w-48 text-slate-700"
+                               value={selectedTeams[alert.id] || alert['NAMA TEAM'] || ''}
+                               onChange={(e) => handleTeamChange(alert.id, e.target.value)}
+                             >
+                               <option value="">- Pilih Team -</option>
+                               {teamList.map((t, i) => <option key={i} value={t}>{t}</option>)}
+                             </select>
+                          </div>
+                        )}
                       </div>
 
                       <div className="flex flex-col items-end gap-3 min-w-[200px] w-full lg:w-auto">
@@ -274,22 +290,30 @@ export default function AlertBanner() {
                             </div>
                          </div>
 
-                         {/* ACTION BUTTONS */}
+                         {/* ACTION BUTTONS DENGAN PROTEKSI RBAC */}
                          <div className="flex gap-2 w-full justify-end">
-                            <button 
-                              onClick={() => handleUpdateStatus(alert.id, 'CANCEL')}
-                              disabled={isProcessing}
-                              className="flex items-center justify-center gap-1 px-3 py-1.5 bg-rose-50 text-rose-600 text-xs font-bold rounded hover:bg-rose-100 border border-rose-200 transition-colors disabled:opacity-50"
-                            >
-                              {isProcessing ? <Loader2 size={14} className="animate-spin"/> : <XCircle size={14} />} Cancel
-                            </button>
-                            <button 
-                              onClick={() => handleUpdateStatus(alert.id, 'SOLVED')}
-                              disabled={isProcessing}
-                              className="flex items-center justify-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-600 text-xs font-bold rounded hover:bg-emerald-100 border border-emerald-200 transition-colors disabled:opacity-50"
-                            >
-                              {isProcessing ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14} />} Selesai
-                            </button>
+                            {canAction ? (
+                              <>
+                                <button 
+                                  onClick={() => handleUpdateStatus(alert.id, 'CANCEL')}
+                                  disabled={isProcessing}
+                                  className="flex items-center justify-center gap-1 px-3 py-1.5 bg-rose-50 text-rose-600 text-xs font-bold rounded hover:bg-rose-100 border border-rose-200 transition-colors disabled:opacity-50"
+                                >
+                                  {isProcessing ? <Loader2 size={14} className="animate-spin"/> : <XCircle size={14} />} Cancel
+                                </button>
+                                <button 
+                                  onClick={() => handleUpdateStatus(alert.id, 'SOLVED')}
+                                  disabled={isProcessing}
+                                  className="flex items-center justify-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-600 text-xs font-bold rounded hover:bg-emerald-100 border border-emerald-200 transition-colors disabled:opacity-50"
+                                >
+                                  {isProcessing ? <Loader2 size={14} className="animate-spin"/> : <CheckCircle size={14} />} Selesai
+                                </button>
+                              </>
+                            ) : (
+                              <div className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 text-slate-400 text-[10px] font-bold rounded uppercase border border-slate-200 italic">
+                                <ShieldAlert size={12} /> View Only
+                              </div>
+                            )}
                          </div>
                       </div>
 

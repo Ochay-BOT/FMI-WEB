@@ -6,16 +6,19 @@ import { usePathname, useRouter } from 'next/navigation';
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import Header from '@/components/Header'; 
+import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 import { 
   LayoutDashboard, Users, Activity, LineChart, Server, 
   History, Menu, LogOut, ClipboardList, Wrench, Megaphone,
-  UserCircle, Settings // Icon baru
+  ShieldCheck, ShieldAlert 
 } from 'lucide-react';
 
 // --- KOMPONEN SIDEBAR ITEM ---
-function SidebarItem({ href, icon, label }) {
+function SidebarItem({ href, icon, label, show = true }: { href: string, icon: any, label: string, show?: boolean }) {
   const pathname = usePathname();
   const isActive = href === '/' ? pathname === '/' : pathname.startsWith(href);
+
+  if (!show) return null;
 
   return (
     <Link href={href}>
@@ -31,30 +34,60 @@ function SidebarItem({ href, icon, label }) {
   );
 }
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [userProfile, setUserProfile] = useState({ name: 'NOC Operator', role: 'Online' });
+  const [userProfile, setUserProfile] = useState<{name: string, role: Role | null}>({ name: 'Loading...', role: null });
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
   const pathname = usePathname(); 
   const isLoginPage = pathname === '/login';
 
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
-  // Fetch Nama Realtime dari Profile
   useEffect(() => {
     async function loadUser() {
       const { data: { user } } = await supabase.auth.getUser();
       if(user) {
-        const { data: profile } = await supabase.from('profiles').select('full_name, role').eq('id', user.id).single();
-        if(profile) setUserProfile({ name: profile.full_name || user.email.split('@')[0], role: profile.role || 'NOC Operator' });
-        else setUserProfile({ name: user.email.split('@')[0], role: 'NOC Operator' });
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, role')
+          .eq('id', user.id)
+          .single();
+        
+        if(profile) {
+          setUserProfile({ 
+            name: profile.full_name || user.email?.split('@')[0] || 'User', 
+            role: profile.role as Role 
+          });
+        }
+      } else if (!isLoginPage) {
+        router.push('/login');
       }
+      setLoading(false);
     }
-    if(!isLoginPage) loadUser();
-  }, [pathname]); // Refresh saat pindah halaman
+    loadUser();
+  }, [pathname, isLoginPage, router]);
+
+  // --- LOGIKA PROTEKSI HALAMAN (SECURITY GATE) ---
+  const canAccessPage = () => {
+    if (loading) return true; // Biarkan loading dulu
+    if (isLoginPage) return true;
+    
+    // Proteksi Tab Broadcast
+    if (pathname.startsWith('/broadcast')) {
+      return hasAccess(userProfile.role, PERMISSIONS.BROADCAST_ACCESS);
+    }
+    
+    // Proteksi Manajemen Tim (Hanya Super Dev)
+    if (pathname.startsWith('/manage-users')) {
+      return hasAccess(userProfile.role, PERMISSIONS.MANAGE_USERS);
+    }
+
+    return true;
+  };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -73,18 +106,16 @@ export default function RootLayout({ children }) {
             {/* SIDEBAR */}
             <aside className={`${sidebarOpen ? 'w-64' : 'w-0 md:w-20'} bg-slate-900 text-white transition-all duration-300 flex flex-col flex-shrink-0 h-screen overflow-y-auto border-r border-slate-800 relative z-50`}>
               
-              {/* Logo */}
               <div className="p-6 flex items-center gap-3 border-b border-slate-800 h-[73px]">
-                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-blue-900/50 flex-shrink-0">N</div>
+                <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white text-lg flex-shrink-0">N</div>
                 {sidebarOpen && (
                   <div className="animate-in fade-in duration-200">
                     <h1 className="font-bold text-lg tracking-wide whitespace-nowrap">NOC SYSTEM</h1>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">ISP Management v1.0</p>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">ISP Management</p>
                   </div>
                 )}
               </div>
 
-              {/* Menu */}
               <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
                 <p className="px-4 text-[10px] font-bold text-slate-600 uppercase mb-2 mt-2 tracking-widest truncate">Main Menu</p>
                 <SidebarItem href="/" icon={<LayoutDashboard size={20} />} label="Overview" />
@@ -95,54 +126,68 @@ export default function RootLayout({ children }) {
                 <p className="px-4 text-[10px] font-bold text-slate-600 uppercase mb-2 mt-6 tracking-widest truncate">Analytics & Master</p>
                 <SidebarItem href="/vlan" icon={<Server size={20} />} label="VLAN Master" />
                 <SidebarItem href="/logs" icon={<History size={20} />} label="Log Aktivitas" />
-                
                 <SidebarItem href="/tools" icon={<Wrench size={20} />} label="Tools & Utilities" />
-                <SidebarItem href="/broadcast" icon={<Megaphone size={20} />} label="Broadcast Message" /> 
+                
+                <p className="px-4 text-[10px] font-bold text-slate-600 uppercase mb-2 mt-6 tracking-widest truncate">Access Control</p>
+                
+                {/* MENU BROADCAST (Sembunyi otomatis jika tidak punya akses) */}
+                <SidebarItem 
+                  href="/broadcast" 
+                  icon={<Megaphone size={20} />} 
+                  label="Broadcast Message" 
+                  show={hasAccess(userProfile.role, PERMISSIONS.BROADCAST_ACCESS)}
+                /> 
+
+                {/* MENU MANAGE USERS (Hanya SUPER_DEV) */}
+                <SidebarItem 
+                  href="/manage-users" 
+                  icon={<ShieldCheck size={20} className="text-amber-400" />} 
+                  label="Manajemen Tim" 
+                  show={hasAccess(userProfile.role, PERMISSIONS.MANAGE_USERS)}
+                /> 
               </nav>
 
-              {/* PROFILE SECTION (UPDATED) */}
+              {/* PROFILE SECTION */}
               <div className="p-4 border-t border-slate-800 bg-slate-900/50">
                 <div className="flex items-center justify-between gap-2">
-                  
-                  {/* Bagian Profile - Sekarang Clickable ke /profile */}
                   <Link href="/profile" className="flex items-center gap-3 overflow-hidden group flex-1 p-2 -ml-2 rounded-lg hover:bg-slate-800 transition-colors">
-                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-blue-400 flex-shrink-0 flex items-center justify-center text-xs font-bold border-2 border-slate-700 shadow-sm group-hover:border-blue-500 transition-colors">
+                    <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 to-blue-400 flex-shrink-0 flex items-center justify-center text-xs font-bold border-2 border-slate-700 shadow-sm">
                       {userProfile.name.charAt(0).toUpperCase()}
                     </div>
                     {sidebarOpen && (
                       <div className="overflow-hidden">
-                        <p className="text-sm font-medium text-slate-200 truncate group-hover:text-white transition-colors">{userProfile.name}</p>
+                        <p className="text-sm font-medium text-slate-200 truncate">{userProfile.name}</p>
                         <div className="flex items-center gap-1.5 mt-0.5">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                          <p className="text-[10px] text-slate-400 font-medium truncate group-hover:text-blue-300">{userProfile.role}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">{userProfile.role || 'Checking...'}</p>
                         </div>
                       </div>
                     )}
                   </Link>
-                  
-                  {/* Logout Button */}
                   {sidebarOpen && (
-                    <button 
-                      onClick={handleLogout}
-                      className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors group"
-                      title="Keluar / Sign Out"
-                    >
-                      <LogOut size={18} className="group-hover:scale-110 transition-transform" />
+                    <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors">
+                      <LogOut size={18} />
                     </button>
                   )}
                 </div>
               </div>
             </aside>
 
-            {/* MAIN CONTENT */}
+            {/* MAIN CONTENT AREA */}
             <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-50 relative">
               <Header />
-              <div className="md:hidden p-2 bg-white shadow-sm flex items-center gap-3 border-b border-slate-200">
-                <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg"><Menu size={24} /></button>
-                <h1 className="font-bold text-slate-800 text-sm">Menu</h1>
-              </div>
               <div className="flex-1 overflow-y-auto overflow-x-hidden relative">
-                {children}
+                {/* PROTEKSI AKSES HALAMAN */}
+                {!loading && !canAccessPage() ? (
+                  <div className="flex flex-col items-center justify-center h-full text-center p-10">
+                    <ShieldAlert size={64} className="text-rose-500 mb-4" />
+                    <h1 className="text-2xl font-bold text-slate-800 font-sans">Akses Dibatasi</h1>
+                    <p className="text-slate-500 max-w-md mt-2">Maaf, akun Anda dengan role <strong>{userProfile.role}</strong> tidak diizinkan mengakses area ini.</p>
+                    <Link href="/" className="mt-6 px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow-lg shadow-blue-200">Kembali ke Dashboard</Link>
+                  </div>
+                ) : (
+                  children
+                )}
               </div>
             </main>
           </>

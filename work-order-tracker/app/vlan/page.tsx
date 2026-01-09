@@ -4,14 +4,9 @@ import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { 
   Search, RefreshCcw, Server, Database, Filter, 
-  Edit, Save, Trash2, X, AlertCircle, CheckCircle, Router 
+  Edit, Save, Trash2, X, AlertCircle, CheckCircle, Router, ShieldCheck 
 } from 'lucide-react';
-
-// Setup Supabase
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 
 // Daftar Tabel VLAN
 const VLAN_TABLES = [
@@ -23,21 +18,41 @@ const VLAN_TABLES = [
 
 export default function VlanPage() {
   const [selectedTable, setSelectedTable] = useState(VLAN_TABLES[0]);
-  const [vlanList, setVlanList] = useState([]);
+  const [vlanList, setVlanList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [userRole, setUserRole] = useState<Role | null>(null);
+
+  // Setup Supabase
+  const supabase = createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
   
   // State Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingVlan, setEditingVlan] = useState(null);
+  const [editingVlan, setEditingVlan] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   
   // State Statistik
   const [stats, setStats] = useState({ total: 0, used: 0, free: 0 });
 
-  // --- 1. FETCH DATA ---
-  async function fetchVlan() {
+  // --- 1. FETCH DATA & ROLE ---
+  async function fetchData() {
     setLoading(true);
+
+    // A. Ambil Role User
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+      if(profile) setUserRole(profile.role as Role);
+    }
+
+    // B. Ambil Data VLAN
     const { data, error } = await supabase
       .from(selectedTable.table)
       .select('*')
@@ -45,7 +60,6 @@ export default function VlanPage() {
 
     if (error) {
       console.error('Error fetching VLAN:', error);
-      // alert('Gagal mengambil data VLAN.'); // Optional alert
     } else {
       setVlanList(data || []);
       calculateStats(data || []);
@@ -54,7 +68,7 @@ export default function VlanPage() {
   }
 
   // Hitung Statistik
-  const calculateStats = (data) => {
+  const calculateStats = (data: any[]) => {
     const total = data.length;
     const used = data.filter(r => {
       const name = (r.NAME || '').toUpperCase();
@@ -65,7 +79,8 @@ export default function VlanPage() {
   };
 
   useEffect(() => {
-    fetchVlan();
+    fetchData();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTable]);
 
   // --- 2. FILTER SEARCH ---
@@ -78,12 +93,12 @@ export default function VlanPage() {
   });
 
   // --- 3. MODAL HANDLERS ---
-  const handleEditClick = (vlanItem) => {
+  const handleEditClick = (vlanItem: any) => {
     setEditingVlan({ ...vlanItem }); 
     setIsModalOpen(true);
   };
 
-  const handleModalChange = (e) => {
+  const handleModalChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setEditingVlan({ ...editingVlan, [e.target.name]: e.target.value });
   };
 
@@ -108,13 +123,13 @@ export default function VlanPage() {
         'FE_PORT': editingVlan['FE_PORT'],
         'FE_MODE': editingVlan['FE_MODE']
       })
-      .match(matchQuery); // Menggunakan match agar lebih fleksibel
+      .match(matchQuery); 
 
     if (error) {
       alert('Gagal update: ' + error.message);
     } else {
       setIsModalOpen(false);
-      fetchVlan(); 
+      fetchData(); 
     }
     setIsSaving(false);
   };
@@ -145,10 +160,13 @@ export default function VlanPage() {
       alert('Gagal reset: ' + error.message);
     } else {
       setIsModalOpen(false);
-      fetchVlan();
+      fetchData();
     }
     setIsSaving(false);
   };
+
+  // --- LOGIKA RBAC ---
+  const canEditDelete = hasAccess(userRole, PERMISSIONS.VLAN_EDIT_DELETE);
 
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans">
@@ -167,7 +185,7 @@ export default function VlanPage() {
              <select 
               className="appearance-none bg-white border border-slate-300 text-slate-700 py-2 pl-4 pr-8 rounded-lg leading-tight focus:outline-none focus:border-blue-500 font-medium text-sm"
               value={selectedTable.name}
-              onChange={(e) => setSelectedTable(VLAN_TABLES.find(t => t.name === e.target.value))}
+              onChange={(e) => setSelectedTable(VLAN_TABLES.find(t => t.name === e.target.value) || VLAN_TABLES[0])}
              >
                {VLAN_TABLES.map((t, idx) => (
                  <option key={idx} value={t.name}>{t.name}</option>
@@ -177,7 +195,7 @@ export default function VlanPage() {
                <Filter size={14} />
              </div>
            </div>
-           <button onClick={fetchVlan} className="p-2 bg-white border rounded-lg hover:bg-slate-50 text-slate-600">
+           <button onClick={fetchData} className="p-2 bg-white border rounded-lg hover:bg-slate-50 text-slate-600">
             <RefreshCcw size={20} className={loading ? 'animate-spin' : ''} />
           </button>
         </div>
@@ -199,7 +217,7 @@ export default function VlanPage() {
         </div>
       </div>
 
-      {/* TABLE SECTION - LEBAR KE SAMPING */}
+      {/* TABLE SECTION */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
         <div className="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
           <div className="relative w-full md:w-96">
@@ -215,7 +233,6 @@ export default function VlanPage() {
           <span className="text-xs text-slate-400">Menampilkan {filteredVlan.length} data</span>
         </div>
 
-        {/* OVERFLOW AUTO -> SUPAYA BISA SCROLL SAMPING */}
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead className="bg-slate-100 text-slate-600 font-bold uppercase text-xs">
@@ -240,13 +257,12 @@ export default function VlanPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
-                <tr><td colSpan="11" className="p-8 text-center text-slate-500">Memuat data VLAN...</td></tr>
+                <tr><td colSpan={11} className="p-8 text-center text-slate-500">Memuat data VLAN...</td></tr>
               ) : filteredVlan.length > 0 ? (
                 filteredVlan.map((v, index) => {
                   const name = (v.NAME || '').toUpperCase();
                   const isUsed = name && name !== '-' && name !== 'AVAILABLE' && name !== '';
                   
-                  // FIX ERROR KEY: Gunakan v.VLAN (pasti ada) atau index sebagai fallback
                   return (
                     <tr key={v.VLAN || index} className={`hover:bg-slate-50 transition-colors ${!isUsed ? 'bg-emerald-50/20' : ''}`}>
                       {/* STATUS (Sticky Left) */}
@@ -275,15 +291,21 @@ export default function VlanPage() {
                       
                       {/* ACTION (Sticky Right) */}
                       <td className="px-6 py-3 text-center sticky right-0 bg-white z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                        <button onClick={() => handleEditClick(v)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit Detail">
-                          <Edit size={16} />
-                        </button>
+                        {canEditDelete ? (
+                          <button onClick={() => handleEditClick(v)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit Detail">
+                            <Edit size={16} />
+                          </button>
+                        ) : (
+                          <span className="text-[10px] bg-slate-100 px-2 py-1 rounded text-slate-400 font-bold border border-slate-200 flex items-center justify-center gap-1 w-fit mx-auto cursor-not-allowed">
+                            <ShieldCheck size={12}/> View Only
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
                 })
               ) : (
-                <tr><td colSpan="11" className="p-8 text-center text-slate-400">Data tidak ditemukan.</td></tr>
+                <tr><td colSpan={11} className="p-8 text-center text-slate-400">Data tidak ditemukan.</td></tr>
               )}
             </tbody>
           </table>
@@ -338,7 +360,7 @@ export default function VlanPage() {
                     <input type="text" name="NE_PORT" value={editingVlan['NE_PORT'] || ''} onChange={handleModalChange}
                       className="w-full p-2 text-sm border border-slate-300 rounded font-mono" />
                   </div>
-                   <div>
+                    <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Mode</label>
                     <input type="text" name="NE_MODE" value={editingVlan['NE_MODE'] || ''} onChange={handleModalChange}
                       className="w-full p-2 text-sm border border-slate-300 rounded font-mono" />
@@ -362,7 +384,7 @@ export default function VlanPage() {
                     <input type="text" name="FE_PORT" value={editingVlan['FE_PORT'] || ''} onChange={handleModalChange}
                       className="w-full p-2 text-sm border border-slate-300 rounded font-mono" />
                   </div>
-                   <div>
+                    <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Mode</label>
                     <input type="text" name="FE_MODE" value={editingVlan['FE_MODE'] || ''} onChange={handleModalChange}
                       className="w-full p-2 text-sm border border-slate-300 rounded font-mono" />
