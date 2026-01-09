@@ -62,7 +62,7 @@ export default function WorkOrderPage() {
         {canCreate && (
           <Link href="/work-orders/create">
             <button className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold flex items-center gap-2 shadow-lg shadow-blue-200 transition">
-              <Plus size={18} /> Buat WO Baru
+              <Plus size={18} /> INPUT WO
             </button>
           </Link>
         )}
@@ -87,11 +87,11 @@ export default function WorkOrderPage() {
             <table className="w-full text-left text-sm whitespace-nowrap">
                <thead className="bg-slate-50 font-bold text-slate-500 uppercase text-xs border-b border-slate-200">
                   <tr>
-                     <th className="px-6 py-4">Tanggal</th>
+                     <th className="px-6 py-4">DATE</th>
                      <th className="px-6 py-4">Subject WO</th>
                      <th className="px-6 py-4 text-center">Status</th>
-                     <th className="px-6 py-4">Team Eksekutor</th>
-                     <th className="px-6 py-4 text-center">Aksi</th>
+                     <th className="px-6 py-4">Team</th>
+                     <th className="px-6 py-4 text-center">ACTION</th>
                   </tr>
                </thead>
                <tbody className="divide-y divide-slate-100">

@@ -45,8 +45,8 @@ export default function Header() {
           <Wifi className="text-white" size={24} />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-slate-800 tracking-tight">NOC Command Center</h1>
-          <p className="text-xs text-slate-500 font-medium">Real-time Network Monitoring & Activities</p>
+          <h1 className="text-xl font-bold text-slate-800 tracking-tight">Network Operating Center</h1>
+          <p className="text-xs text-slate-500 font-medium">Real-time Monitoring & Activities</p>
         </div>
       </div>
 
@@ -60,7 +60,7 @@ export default function Header() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
             </span>
-            <span className="text-xs font-bold uppercase tracking-wide">System Normal</span>
+            <span className="text-xs font-bold uppercase tracking-wide">System Online</span>
           </div>
         </div>
 

@@ -93,7 +93,7 @@ export default function ClientListPage() {
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <Users className="text-blue-600" /> Data Client Corporate
+            <Users className="text-blue-600" /> Data Client
           </h1>
           <p className="text-sm text-slate-500">Database pelanggan aktif & teknis</p>
         </div>
@@ -135,9 +135,9 @@ export default function ClientListPage() {
               <tr>
                 <th className="px-6 py-4">ID Pelanggan</th>
                 <th className="px-6 py-4">Nama Pelanggan</th>
-                <th className="px-6 py-4">Layanan</th>
+                <th className="px-6 py-4">Layanan & KAPASITAS</th>
                 <th className="px-6 py-4 text-center">Status</th>
-                <th className="px-6 py-4 text-center">Sinyal</th>
+                <th className="px-6 py-4 text-center">REDAMAN</th>
                 <th className="px-6 py-4 text-center">Action</th>
               </tr>
             </thead>

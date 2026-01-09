@@ -15,11 +15,11 @@ import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 const TABLE_MAP = {
-  'Pelanggan Baru': 'Berlangganan 2026',
+  'Berlangganan': 'Berlangganan 2026',
   'Berhenti Langganan': 'Berhenti Berlangganan 2026',
-  'Cuti / Isolir': 'Berhenti Sementara 2026',
-  'Upgrade Layanan': 'Upgrade 2026',
-  'Downgrade Layanan': 'Downgrade 2026'
+  'Berhenti Sementara': 'Berhenti Sementara 2026',
+  'Upgrade': 'Upgrade 2026',
+  'Downgrade': 'Downgrade 2026'
 };
 
 export default function TrackerPage() {
@@ -183,9 +183,9 @@ export default function TrackerPage() {
             <div className="p-2 bg-emerald-100 rounded-lg">
                 <UserPlus className="text-emerald-600" size={24} />
             </div>
-            Tracker Pelanggan 2026
+            Weekly Report
           </h1>
-          <p className="text-slate-500 text-sm mt-1">Monitoring status pemasangan dan pemutusan pelanggan</p>
+          <p className="text-slate-500 text-sm mt-1">Monitoring status perubahan Client</p>
         </div>
 
         <div className="flex flex-wrap gap-3">

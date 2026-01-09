@@ -110,22 +110,22 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-white text-lg flex-shrink-0">N</div>
                 {sidebarOpen && (
                   <div className="animate-in fade-in duration-200">
-                    <h1 className="font-bold text-lg tracking-wide whitespace-nowrap">NOC SYSTEM</h1>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">ISP Management</p>
+                    <h1 className="font-bold text-lg tracking-wide whitespace-nowrap">NOC FMI</h1>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">TOGETHER WE ACHIEVE MORE</p>
                   </div>
                 )}
               </div>
 
               <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
                 <p className="px-4 text-[10px] font-bold text-slate-600 uppercase mb-2 mt-2 tracking-widest truncate">Main Menu</p>
-                <SidebarItem href="/" icon={<LayoutDashboard size={20} />} label="Overview" />
+                <SidebarItem href="/" icon={<LayoutDashboard size={20} />} label="Dashboard" />
                 <SidebarItem href="/clients" icon={<Users size={20} />} label="Data Client" />
-                <SidebarItem href="/work-orders" icon={<ClipboardList size={20} />} label="Work Orders" />
-                <SidebarItem href="/tracker" icon={<LineChart size={20} />} label="Tracker Pelanggan" />
+                <SidebarItem href="/work-orders" icon={<ClipboardList size={20} />} label="Monthly Report" />
+                <SidebarItem href="/tracker" icon={<LineChart size={20} />} label="Weekly Report" />
                 
                 <p className="px-4 text-[10px] font-bold text-slate-600 uppercase mb-2 mt-6 tracking-widest truncate">Analytics & Master</p>
-                <SidebarItem href="/vlan" icon={<Server size={20} />} label="VLAN Master" />
-                <SidebarItem href="/logs" icon={<History size={20} />} label="Log Aktivitas" />
+                <SidebarItem href="/vlan" icon={<Server size={20} />} label="VLAN Database" />
+                <SidebarItem href="/logs" icon={<History size={20} />} label="Activity Log" />
                 <SidebarItem href="/tools" icon={<Wrench size={20} />} label="Tools & Utilities" />
                 
                 <p className="px-4 text-[10px] font-bold text-slate-600 uppercase mb-2 mt-6 tracking-widest truncate">Access Control</p>
@@ -142,7 +142,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <SidebarItem 
                   href="/manage-users" 
                   icon={<ShieldCheck size={20} className="text-amber-400" />} 
-                  label="Manajemen Tim" 
+                  label="Team Management" 
                   show={hasAccess(userProfile.role, PERMISSIONS.MANAGE_USERS)}
                 /> 
               </nav>

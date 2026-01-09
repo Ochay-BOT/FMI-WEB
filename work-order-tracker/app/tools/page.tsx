@@ -5,7 +5,7 @@ import { createBrowserClient } from '@supabase/ssr';
 import { 
   Wrench, Calculator, Activity, FileText, Shuffle, 
   Copy, Download, RefreshCcw, Plus, X, CheckCircle, Search, 
-  Calendar, Network, Globe, Save, Lock
+  Calendar, Network, Globe, Save, Lock, Loader2,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { id as indonesia } from 'date-fns/locale';
@@ -63,7 +63,7 @@ export default function ToolsPage() {
           
           // RBAC Logic: CS can view all, but others are restricted based on PERMISSIONS
           const isDistributor = tab.id === 'distributor';
-          const canAccessDistributor = hasAccess(userRole, PERMISSIONS.TOOLS_WO_DISTRIBUTOR);
+          const canAccessDistributor = hasAccess(userRole, PERMISSIONS.TOOLS_WO_DISTRIBUTOR_VIEW);
           
           // Disable tab if not Super Dev/Admin/Aktivator (Specifically for WO Distributor)
           const isDisabled = isDistributor && !canAccessDistributor && userRole !== 'CS';
@@ -214,67 +214,192 @@ function ReportBackbone({ userRole }: { userRole: Role | null }) {
 }
 
 // ==========================================
-// 4. WO DISTRIBUTOR (CORE RBAC)
+// 4. WO DISTRIBUTOR (FIXED: COLUMN 'NAMA TEAM')
 // ==========================================
 function WoDistributor({ userRole }: { userRole: Role | null }) {
   const [woList, setWoList] = useState<any[]>([]);
-  const [selectedWos, setSelectedWos] = useState<any[]>([]);
+  const [technicians, setTechnicians] = useState<any[]>([]); 
+  const [selectedTechs, setSelectedTechs] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [distributing, setDistributing] = useState(false);
 
-  // RBAC Actions
-  const canDistribute = hasAccess(userRole, PERMISSIONS.TOOLS_DISTRIBUTE_ACTION);
-  const isCS = userRole === 'CS';
+  // Filter Tanggal (Default: Hari Ini)
+  const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0,10));
 
+  const canDistribute = hasAccess(userRole, PERMISSIONS.TOOLS_WO_DISTRIBUTOR_ACTION);
+
+  // --- 1. FETCH WO (Updated Column Name) ---
   const fetchWO = async () => {
     setLoading(true);
-    const { data } = await supabase.from('Report Bulanan').select('*').in('STATUS', ['PENDING', 'OPEN']).limit(10);
-    if (data) setWoList(data);
+    
+    let query = supabase.from('Report Bulanan').select('*');
+
+    // LOGIC FILTER TANGGAL (PRIORITAS UTAMA)
+    if (filterDate) {
+      const dateObj = new Date(filterDate);
+      const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
+      
+      // Format: "11 Januari 2026"
+      const searchString = `${dateObj.getDate()} ${months[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
+      console.log("Mencari teks:", searchString); 
+
+      // Cari di KETERANGAN
+      query = query.ilike('KETERANGAN', `%${searchString}%`);
+      
+      // NOTE: Saat mencari tanggal spesifik, kita longgarkan filter status agar datanya kelihatan dulu
+    } 
+    else {
+      // Jika TIDAK pilih tanggal (Default), cari yang pending & belum ada tim
+      query = query
+        .in('STATUS', ['PENDING', 'OPEN', 'PROGRESS', 'ON PROGRESS'])
+        .is('NAMA TEAM', null); // <--- PERBAIKAN DISINI (Pakai 'NAMA TEAM')
+    }
+
+    const { data, error } = await query.order('id', { ascending: false }).limit(50);
+      
+    if (error) {
+      alert("Gagal ambil data: " + error.message);
+    } else {
+      setWoList(data || []);
+    }
     setLoading(false);
   };
 
+  // --- 2. FETCH TEKNISI ---
+  useEffect(() => {
+    async function getTechs() {
+      if (!canDistribute) return;
+      const { data } = await supabase
+        .from('profiles')
+        .select('id, full_name, role')
+        .in('role', ['NOC', 'AKTIVATOR', 'SUPER_DEV']); 
+      if (data) setTechnicians(data);
+    }
+    getTechs();
+  }, [canDistribute]);
+
+  const toggleTech = (name: string) => {
+    if (selectedTechs.includes(name)) {
+      setSelectedTechs(selectedTechs.filter(t => t !== name));
+    } else {
+      setSelectedTechs([...selectedTechs, name]);
+    }
+  };
+
+  // --- 3. DISTRIBUTE WO (Updated Column Name) ---
   const distributeWO = async () => {
-    if (!canDistribute) return alert("Anda tidak memiliki akses untuk mendistribusikan WO.");
-    alert("Distribusi berhasil dilakukan!");
+    if (!canDistribute) return alert("Akses Ditolak.");
+    if (selectedTechs.length === 0) return alert("Pilih minimal 1 tim!");
+    if (woList.length === 0) return alert("Tidak ada WO.");
+
+    setDistributing(true);
+
+    try {
+      const updates = woList.map(async (wo, index) => {
+        const assignedTech = selectedTechs[index % selectedTechs.length];
+        
+        // UPDATE KOLOM 'NAMA TEAM'
+        const { error } = await supabase
+          .from('Report Bulanan')
+          .update({ 
+            'NAMA TEAM': assignedTech, // <--- PERBAIKAN DISINI
+            'STATUS': 'OPEN' 
+          }) 
+          .eq('id', wo.id);
+          
+        if (error) throw error;
+      });
+
+      await Promise.all(updates);
+      alert(`Sukses distribusikan ${woList.length} WO.`);
+      fetchWO(); 
+      setSelectedTechs([]); 
+
+    } catch (error: any) {
+      alert("Error saving: " + error.message);
+    } finally {
+      setDistributing(false);
+    }
   };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 min-h-[600px]">
-       <div className="lg:col-span-2 flex flex-col border rounded-xl overflow-hidden">
-          <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-             <h3 className="font-bold text-sm">WO Pending</h3>
-             <button onClick={fetchWO} className="bg-blue-600 text-white px-3 py-1.5 rounded text-xs flex items-center gap-1"><RefreshCcw size={14}/> Get Data</button>
+       
+       {/* LIST WO */}
+       <div className="lg:col-span-2 flex flex-col border rounded-xl overflow-hidden bg-white shadow-sm">
+          <div className="p-4 bg-slate-50 border-b flex flex-col md:flex-row justify-between items-center gap-3">
+             <h3 className="font-bold text-sm text-slate-700">WO Pending ({woList.length})</h3>
+             <div className="flex items-center gap-2">
+                <input 
+                  type="date" 
+                  value={filterDate}
+                  onChange={(e) => setFilterDate(e.target.value)}
+                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs"
+                />
+                <button onClick={fetchWO} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1">
+                   {loading ? 'Loading...' : 'Get Data'}
+                </button>
+             </div>
           </div>
-          <div className="flex-1 p-4 space-y-2 overflow-y-auto">
-             {woList.map(wo => (
-               <div key={wo.id} className="p-3 border rounded-lg flex items-center gap-3">
-                  <input type="checkbox" onChange={() => {}} disabled={isCS} />
-                  <div>
-                    <p className="text-sm font-bold">{wo['SUBJECT WO']}</p>
-                    <span className="text-[10px] bg-amber-100 text-amber-700 px-2 rounded uppercase font-bold">{wo.STATUS}</span>
+
+          <div className="flex-1 p-4 space-y-2 overflow-y-auto max-h-[400px]">
+             {woList.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                   <p className="text-xs italic">Tidak ada data ditemukan.</p>
+                </div>
+             ) : (
+                woList.map((wo, idx) => (
+                  <div key={idx} className="p-3 border border-slate-200 rounded-lg flex justify-between items-center bg-white hover:bg-slate-50 transition">
+                     <div>
+                        <div className="flex items-center gap-2 mb-1">
+                           <span className="text-[10px] font-mono text-slate-400">
+                              {/* Coba tampilkan tanggal dari KETERANGAN atau kolom TANGGAL */}
+                              {wo.TANGGAL ? format(new Date(wo.TANGGAL), 'dd/MM/yyyy') : '-'}
+                           </span>
+                           <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-amber-100 text-amber-700 border border-amber-200">
+                              {wo.STATUS}
+                           </span>
+                           {/* Tampilkan Nama Team jika sudah ada (Pakai kurung siku karena ada spasi) */}
+                           {wo['NAMA TEAM'] && (
+                             <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">
+                               {wo['NAMA TEAM']}
+                             </span>
+                           )}
+                        </div>
+                        <p className="text-sm font-bold text-slate-800 line-clamp-1">{wo['SUBJECT WO'] || 'No Subject'}</p>
+                        <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5 italic">
+                           {wo['KETERANGAN'] || '-'}
+                        </p>
+                     </div>
                   </div>
-               </div>
-             ))}
-          </div>
-          <div className="p-4 border-t">
-             {/* RBAC: Tombol Distribute hanya muncul/aktif untuk Admin & Super Dev */}
-             <button 
-                onClick={distributeWO} 
-                disabled={!canDistribute || woList.length === 0}
-                className={`w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition ${
-                  !canDistribute ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg'
-                }`}
-             >
-                <Shuffle size={18} /> {!canDistribute ? 'Distribute Restricted' : 'Distribute to Teams'}
-             </button>
-             {!canDistribute && !isCS && (
-               <p className="text-[10px] text-center text-rose-500 mt-2 italic">Akses Aktivator: Hanya diperbolehkan Get Data & Download.</p>
+                ))
              )}
           </div>
        </div>
 
-       <div className="border rounded-xl p-5 bg-white h-fit">
-          <h3 className="font-bold mb-4 flex items-center gap-2"><Search size={18}/> Management Info</h3>
-          <p className="text-xs text-slate-500 italic">Hanya Super Dev & Admin yang bisa memanajemen team untuk distribusi otomatis.</p>
+       {/* PILIH TIM */}
+       <div className="space-y-6">
+          <div className="border rounded-xl p-5 bg-white shadow-sm h-full flex flex-col">
+             <h3 className="font-bold text-sm text-slate-800 mb-3">Pilih Tim Piket</h3>
+             <div className="space-y-2 flex-1 overflow-y-auto pr-1 min-h-[200px]">
+                {technicians.length === 0 ? <p className="text-xs text-slate-400">Loading users...</p> : 
+                   technicians.map((tech) => (
+                      <label key={tech.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer ${selectedTechs.includes(tech.full_name) ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-slate-50'}`}>
+                         <input type="checkbox" checked={selectedTechs.includes(tech.full_name)} onChange={() => toggleTech(tech.full_name)} className="rounded text-blue-600"/>
+                         <div>
+                            <p className="text-sm font-bold text-slate-700">{tech.full_name}</p>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase">{tech.role}</p>
+                         </div>
+                      </label>
+                   ))
+                }
+             </div>
+             <div className="mt-4 pt-4 border-t">
+               <button onClick={distributeWO} disabled={!canDistribute || selectedTechs.length === 0 || woList.length === 0 || distributing} className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50">
+                 {distributing ? 'Membagikan...' : `Distribute (${selectedTechs.length} Tim)`}
+               </button>
+             </div>
+          </div>
        </div>
     </div>
   );
