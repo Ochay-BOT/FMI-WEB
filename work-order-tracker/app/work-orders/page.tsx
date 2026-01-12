@@ -85,12 +85,14 @@ export default function WorkOrderPage() {
          <div className="p-4 border-b bg-slate-50/50">
             <div className="relative max-w-md">
                <Search className="absolute left-3 top-2.5 text-slate-400" size={18}/>
+               {/* FIX: INPUT TEXT HITAM PEKAT */}
                <input 
                  type="text" 
                  placeholder="Cari Subject / Team..." 
                  value={search}
                  onChange={(e) => setSearch(e.target.value)}
-                 className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                 style={{ color: 'black' }}
+                 className="w-full pl-10 pr-4 py-2 border border-slate-300 bg-white rounded-lg text-sm font-bold text-black placeholder:text-gray-500 outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
                />
             </div>
          </div>

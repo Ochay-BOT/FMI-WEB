@@ -4,11 +4,12 @@ import { useEffect, useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { 
   Search, RefreshCcw, Server, Database, Filter, 
-  Edit, Save, Trash2, X, AlertCircle, CheckCircle, Router, ShieldCheck 
+  Edit, Save, Trash2, X, AlertCircle, CheckCircle, Router, ShieldCheck, AlertTriangle, 
+  ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
+import { toast } from 'sonner';
 
-// Daftar Tabel VLAN
 const VLAN_TABLES = [
   { name: 'VLAN 1-1000 (Metro)', table: 'Daftar Vlan 1-1000' },
   { name: 'VLAN 1000+ (Corporate)', table: 'Daftar Vlan 1000+' },
@@ -23,43 +24,36 @@ export default function VlanPage() {
   const [search, setSearch] = useState('');
   const [userRole, setUserRole] = useState<Role | null>(null);
 
-  // Setup Supabase
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50; 
+
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   );
   
-  // State Edit Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingVlan, setEditingVlan] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   
-  // State Statistik
   const [stats, setStats] = useState({ total: 0, used: 0, free: 0 });
 
-  // --- 1. FETCH DATA & ROLE ---
   async function fetchData() {
     setLoading(true);
-
-    // A. Ambil Role User
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
+        .from('profiles').select('role').eq('id', user.id).single();
       if(profile) setUserRole(profile.role as Role);
     }
 
-    // B. Ambil Data VLAN
     const { data, error } = await supabase
-      .from(selectedTable.table)
-      .select('*')
-      .order('VLAN', { ascending: true });
+      .from(selectedTable.table).select('*').order('VLAN', { ascending: true });
 
     if (error) {
       console.error('Error fetching VLAN:', error);
+      toast.error("Gagal memuat data VLAN");
     } else {
       setVlanList(data || []);
       calculateStats(data || []);
@@ -67,7 +61,6 @@ export default function VlanPage() {
     setLoading(false);
   }
 
-  // Hitung Statistik
   const calculateStats = (data: any[]) => {
     const total = data.length;
     const used = data.filter(r => {
@@ -80,10 +73,10 @@ export default function VlanPage() {
 
   useEffect(() => {
     fetchData();
+    setCurrentPage(1); 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedTable]);
 
-  // --- 2. FILTER SEARCH ---
   const filteredVlan = vlanList.filter(item => {
     const s = search.toLowerCase();
     const vlanID = item.VLAN?.toString() || '';
@@ -92,7 +85,16 @@ export default function VlanPage() {
     return vlanID.includes(s) || name.includes(s) || service.includes(s);
   });
 
-  // --- 3. MODAL HANDLERS ---
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search]);
+
+  const totalPages = Math.ceil(filteredVlan.length / itemsPerPage);
+  const paginatedData = filteredVlan.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   const handleEditClick = (vlanItem: any) => {
     setEditingVlan({ ...vlanItem }); 
     setIsModalOpen(true);
@@ -102,11 +104,8 @@ export default function VlanPage() {
     setEditingVlan({ ...editingVlan, [e.target.name]: e.target.value });
   };
 
-  // --- 4. SIMPAN PERUBAHAN ---
   const handleSaveChanges = async () => {
     setIsSaving(true);
-    
-    // Kita gunakan kolom 'VLAN' sebagai acuan update jika 'id' tidak ada
     const matchQuery = editingVlan.id ? { id: editingVlan.id } : { VLAN: editingVlan.VLAN };
 
     const { error } = await supabase
@@ -114,11 +113,9 @@ export default function VlanPage() {
       .update({
         'NAME': editingVlan.NAME,
         'SERVICE ID': editingVlan['SERVICE ID'],
-        // Near End
         'NE_SWITCH POP': editingVlan['NE_SWITCH POP'],
         'NE_PORT': editingVlan['NE_PORT'],
         'NE_MODE': editingVlan['NE_MODE'],
-        // Far End
         'FE_SWITCH POP': editingVlan['FE_SWITCH POP'],
         'FE_PORT': editingVlan['FE_PORT'],
         'FE_MODE': editingVlan['FE_MODE']
@@ -126,19 +123,22 @@ export default function VlanPage() {
       .match(matchQuery); 
 
     if (error) {
-      alert('Gagal update: ' + error.message);
+      toast.error('Gagal update: ' + error.message);
     } else {
+      toast.success('Data VLAN Berhasil Diupdate!');
       setIsModalOpen(false);
       fetchData(); 
     }
     setIsSaving(false);
   };
 
-  // --- 5. RESET VLAN ---
-  const handleResetVlan = async () => {
-    if (!confirm(`Yakin ingin melepas VLAN ${editingVlan.VLAN}?`)) return;
+  const handleResetClick = () => {
+    setShowResetConfirm(true);
+  };
 
+  const executeResetVlan = async () => {
     setIsSaving(true);
+    setShowResetConfirm(false);
     
     const matchQuery = editingVlan.id ? { id: editingVlan.id } : { VLAN: editingVlan.VLAN };
 
@@ -147,29 +147,25 @@ export default function VlanPage() {
       .update({
         'NAME': 'AVAILABLE',
         'SERVICE ID': '-',
-        'NE_SWITCH POP': '-',
-        'NE_PORT': '-',
-        'NE_MODE': '-',
-        'FE_SWITCH POP': '-',
-        'FE_PORT': '-',
-        'FE_MODE': '-'
+        'NE_SWITCH POP': '-', 'NE_PORT': '-', 'NE_MODE': '-',
+        'FE_SWITCH POP': '-', 'FE_PORT': '-', 'FE_MODE': '-'
       })
       .match(matchQuery);
 
     if (error) {
-      alert('Gagal reset: ' + error.message);
+      toast.error('Gagal reset: ' + error.message);
     } else {
+      toast.success(`VLAN ${editingVlan.VLAN} Berhasil Dikosongkan!`);
       setIsModalOpen(false);
       fetchData();
     }
     setIsSaving(false);
   };
 
-  // --- LOGIKA RBAC ---
   const canEditDelete = hasAccess(userRole, PERMISSIONS.VLAN_EDIT_DELETE);
 
   return (
-    <div className="p-6 bg-slate-50 min-h-screen font-sans">
+    <div className="p-6 bg-slate-50 min-h-screen font-sans relative">
       
       {/* HEADER */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
@@ -218,8 +214,8 @@ export default function VlanPage() {
       </div>
 
       {/* TABLE SECTION */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="p-4 border-b border-slate-100 flex items-center gap-3 bg-slate-50/50">
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
           <div className="relative w-full md:w-96">
             <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
             <input 
@@ -230,7 +226,26 @@ export default function VlanPage() {
               className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg w-full text-sm text-slate-900 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 outline-none bg-white"
             />
           </div>
-          <span className="text-xs text-slate-400">Menampilkan {filteredVlan.length} data</span>
+          
+          <div className="text-xs text-slate-500 font-bold flex items-center gap-2">
+             <span>Page {currentPage} of {totalPages || 1}</span>
+             <div className="flex gap-1">
+                <button 
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1 hover:bg-slate-200 rounded disabled:opacity-50"
+                >
+                  <ChevronLeft size={16}/>
+                </button>
+                <button 
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="p-1 hover:bg-slate-200 rounded disabled:opacity-50"
+                >
+                  <ChevronRight size={16}/>
+                </button>
+             </div>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -241,55 +256,42 @@ export default function VlanPage() {
                 <th className="px-6 py-3 border-b w-20">VLAN ID</th>
                 <th className="px-6 py-3 border-b min-w-[200px]">Customer Name</th>
                 <th className="px-6 py-3 border-b">Service ID</th>
-                
-                {/* NE GROUP */}
                 <th className="px-6 py-3 border-b bg-blue-50/50 text-blue-700 min-w-[150px]">NE Switch (POP)</th>
                 <th className="px-6 py-3 border-b bg-blue-50/50 text-blue-700">NE Port</th>
                 <th className="px-6 py-3 border-b bg-blue-50/50 text-blue-700">NE Mode</th>
-                
-                {/* FE GROUP */}
                 <th className="px-6 py-3 border-b bg-purple-50/50 text-purple-700 min-w-[150px]">FE Switch (CPE)</th>
                 <th className="px-6 py-3 border-b bg-purple-50/50 text-purple-700">FE Port</th>
                 <th className="px-6 py-3 border-b bg-purple-50/50 text-purple-700">FE Mode</th>
-                
                 <th className="px-6 py-3 border-b text-center sticky right-0 bg-slate-100 z-10 shadow-sm">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan={11} className="p-8 text-center text-slate-500">Memuat data VLAN...</td></tr>
-              ) : filteredVlan.length > 0 ? (
-                filteredVlan.map((v, index) => {
+              ) : paginatedData.length > 0 ? (
+                paginatedData.map((v, index) => {
                   const name = (v.NAME || '').toUpperCase();
                   const isUsed = name && name !== '-' && name !== 'AVAILABLE' && name !== '';
                   
                   return (
                     <tr key={v.VLAN || index} className={`hover:bg-slate-50 transition-colors ${!isUsed ? 'bg-emerald-50/20' : ''}`}>
-                      {/* STATUS (Sticky Left) */}
                       <td className="px-6 py-3 text-center sticky left-0 bg-white z-10 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                         {isUsed ? 
                           <span className="px-2 py-1 rounded text-[10px] font-bold bg-rose-100 text-rose-700 border border-rose-200 uppercase">USED</span> : 
                           <span className="px-2 py-1 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200 uppercase">FREE</span>
                         }
                       </td>
-                      
                       <td className="px-6 py-3 font-mono font-bold text-blue-700 text-base">{v.VLAN}</td>
                       <td className="px-6 py-3 font-medium text-slate-800">
                         {v.NAME || <span className="text-slate-400 italic">AVAILABLE</span>}
                       </td>
                       <td className="px-6 py-3 text-slate-500 text-xs">{v['SERVICE ID'] || '-'}</td>
-                      
-                      {/* NE DATA */}
                       <td className="px-6 py-3 text-slate-600 text-xs font-mono bg-blue-50/20">{v['NE_SWITCH POP']}</td>
                       <td className="px-6 py-3 text-slate-600 text-xs font-mono bg-blue-50/20">{v['NE_PORT']}</td>
                       <td className="px-6 py-3 text-slate-600 text-xs font-mono bg-blue-50/20">{v['NE_MODE']}</td>
-                      
-                      {/* FE DATA */}
                       <td className="px-6 py-3 text-slate-600 text-xs font-mono bg-purple-50/20">{v['FE_SWITCH POP']}</td>
                       <td className="px-6 py-3 text-slate-600 text-xs font-mono bg-purple-50/20">{v['FE_PORT']}</td>
                       <td className="px-6 py-3 text-slate-600 text-xs font-mono bg-purple-50/20">{v['FE_MODE']}</td>
-                      
-                      {/* ACTION (Sticky Right) */}
                       <td className="px-6 py-3 text-center sticky right-0 bg-white z-10 shadow-[-2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                         {canEditDelete ? (
                           <button onClick={() => handleEditClick(v)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit Detail">
@@ -310,11 +312,32 @@ export default function VlanPage() {
             </tbody>
           </table>
         </div>
+        
+        <div className="p-3 border-t border-slate-100 bg-slate-50 flex justify-center">
+            <div className="flex items-center gap-4 text-sm font-bold text-slate-600">
+                <button 
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  Previous
+                </button>
+                <span>Page {currentPage} of {totalPages || 1}</span>
+                <button 
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || totalPages === 0}
+                  className="px-4 py-2 bg-white border border-slate-200 rounded-lg hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                >
+                  Next
+                </button>
+            </div>
+        </div>
+
       </div>
 
-      {/* --- MODAL EDIT VLAN --- */}
+      {/* --- MODAL EDIT VLAN (Z-Index 50) --- */}
       {isModalOpen && editingVlan && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
             
             <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
@@ -395,7 +418,7 @@ export default function VlanPage() {
             </div>
 
             <div className="p-4 border-t bg-slate-50 flex justify-between items-center shrink-0">
-              <button onClick={handleResetVlan} disabled={isSaving}
+              <button onClick={handleResetClick} disabled={isSaving}
                 className="text-rose-600 text-sm font-bold hover:bg-rose-50 px-3 py-2 rounded-lg transition-colors flex items-center gap-1">
                 <Trash2 size={16} /> Reset / Kosongkan
               </button>
@@ -408,6 +431,37 @@ export default function VlanPage() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* --- MODAL KONFIRMASI RESET (Dipindah ke Bawah + Z-Index 100) --- */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/70 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-[400px] overflow-hidden border border-slate-200 scale-100 animate-in zoom-in-95 duration-200">
+            <div className="p-6 text-center border-b border-slate-100">
+              <div className="w-14 h-14 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={28} />
+              </div>
+              <h2 className="text-lg font-bold text-slate-800">Lepas VLAN {editingVlan?.VLAN}?</h2>
+              <p className="text-sm text-slate-500 mt-2">
+                Data customer akan dihapus dan status VLAN akan kembali menjadi <strong className="text-emerald-600">AVAILABLE</strong>.
+              </p>
+            </div>
+            <div className="p-4 bg-slate-50 flex gap-3">
+              <button 
+                onClick={() => setShowResetConfirm(false)}
+                className="flex-1 py-2.5 px-4 bg-white text-slate-700 border border-slate-200 rounded-xl font-bold hover:bg-slate-100 transition"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={executeResetVlan}
+                className="flex-1 py-2.5 px-4 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition shadow-lg shadow-rose-500/20"
+              >
+                Ya, Lepas
+              </button>
+            </div>
           </div>
         </div>
       )}
