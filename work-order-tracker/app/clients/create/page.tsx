@@ -3,15 +3,18 @@
 // Tetap pertahankan ini biar aman
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect, Suspense } from 'react'; // <--- Tambah Suspense
+import { useState, useEffect, Suspense } from 'react'; 
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Save, ArrowLeft, Loader2, UserPlus } from 'lucide-react';
+import { Save, ArrowLeft, Loader2, UserPlus, FileText } from 'lucide-react';
+
+// --- IMPORT LOGGER HELPER (Untuk DB & Telegram) ---
+import { logActivity } from '@/lib/logger';
 
 // --- BAGIAN 1: LOGIKA FORM DIPISAH KE SINI ---
 function CreateClientContent() {
   const router = useRouter();
-  const searchParams = useSearchParams(); // Hook ini yang bikin rewel
+  const searchParams = useSearchParams(); 
   
   // Ambil nama dari URL (jika ada kiriman dari Tracker)
   const nameFromTracker = searchParams.get('name') || '';
@@ -34,7 +37,10 @@ function CreateClientContent() {
     'Far End': '',
     'STATUS': 'Active', 
     'Kapasitas': '',
-    'RX ONT/SFP': ''
+    'RX ONT/SFP': '',
+    'SN ONT': '',       // Input Tambahan (TXT Only)
+    'Data Teknis': '',  // Input Tambahan (TXT Only)
+    'Konfigurasi': ''   // Input Tambahan (TXT Only)
   });
 
   // Effect: Isi nama otomatis jika ada data dari Tracker
@@ -48,6 +54,46 @@ function CreateClientContent() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // --- FUNGSI GENERATE & DOWNLOAD TXT ---
+  const downloadTxt = (data: any) => {
+    // Format Template
+    const content = `Dear All,
+
+Telah diregister dan diluruskan client di bawah ini :
+
+ID Pelanggan            : ${data['ID Pelanggan'] || '-'}
+Nama Pelanggan          : ${data['Nama Pelanggan'] || '-'}
+Alamat                  : ${data['ALAMAT'] || '-'}
+VLAN ID                 : ${data['VMAN / VLAN'] || '-'}
+Near End                : ${data['Near End'] || '-'}
+Far End                 : ${data['Far End'] || '-'}
+Kapasitas               : ${data['Kapasitas'] || '-'}
+RX ONT                  : ${data['RX ONT/SFP'] || '-'}
+SN ONT                  : ${data['SN ONT'] || '-'}
+Data Pelanggan          : Sudah Ditambahkan
+Daftar Vlan             : Sudah Ditambahkan
+MRTG                    : Sudah Ditambahkan
+
+Data Teknis : 
+${data['Data Teknis'] || '-'}
+
+Konfigurasi : 
+${data['Konfigurasi'] || '-'}
+`;
+
+    // Proses Download File
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    // Nama file: Register_NamaPT.txt (Spasi diganti underscore)
+    const fileName = `Register_${data['Nama Pelanggan'] ? data['Nama Pelanggan'].replace(/\s+/g, '_') : 'Client'}.txt`;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleSave = async (e: any) => {
     e.preventDefault();
     setSaving(true);
@@ -59,17 +105,52 @@ function CreateClientContent() {
       return;
     }
 
+    // Persiapan Data untuk Database
+    // HANYA kirim kolom yang benar-benar ada di tabel Database agar tidak error
+    const dbPayload = {
+        'ID Pelanggan': formData['ID Pelanggan'],
+        'Nama Pelanggan': formData['Nama Pelanggan'],
+        'ALAMAT': formData['ALAMAT'],
+        'VMAN / VLAN': formData['VMAN / VLAN'],
+        'Near End': formData['Near End'],
+        'Far End': formData['Far End'],
+        'STATUS': formData['STATUS'],
+        'Kapasitas': formData['Kapasitas'],
+        'RX ONT/SFP': formData['RX ONT/SFP'],
+        // 'SN ONT', 'Data Teknis', 'Konfigurasi' TIDAK DIKIRIM ke DB (Kecuali kolomnya sudah kamu buat)
+    };
+
     // Eksekusi Simpan ke Supabase
     const { error } = await supabase
       .from('Data Client Corporate')
-      .insert([formData]); 
+      .insert([dbPayload]); 
 
     if (error) {
       alert('Gagal menyimpan: ' + error.message);
       setSaving(false);
     } else {
-      alert('Pelanggan berhasil ditambahkan!');
-      router.push('/clients'); // Kembali ke tabel utama
+      
+      // --- INTEGRASI LOGGER (DB + TELEGRAM) ---
+      // 1. Ambil info user yang sedang login untuk dicatat sebagai 'actor'
+      const { data: { user } } = await supabase.auth.getUser();
+      let actorName = 'System';
+      if(user) {
+        const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+        actorName = profile?.full_name || user.email || 'User';
+      }
+
+      // 2. Panggil Helper Logger
+      await logActivity({
+        activity: 'Input Client Corp', 
+        subject: formData['Nama Pelanggan'],
+        actor: actorName
+      });
+
+      // --- DOWNLOAD TXT & REDIRECT ---
+      downloadTxt(formData); 
+
+      alert('Client berhasil disimpan, Notifikasi Terkirim & Report TXT diunduh!');
+      router.push('/clients'); 
       router.refresh();
     }
   };
@@ -129,9 +210,9 @@ function CreateClientContent() {
           </div>
         </div>
 
-        {/* GROUP 2: DATA TEKNIS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <div>
+        {/* GROUP 2: SPESIFIKASI JARINGAN */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+          <div className="lg:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">VLAN / VMAN</label>
             <input 
               name="VMAN / VLAN" 
@@ -140,8 +221,8 @@ function CreateClientContent() {
               className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-blue-600" 
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Kapasitas (Bandwidth)</label>
+          <div className="lg:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">Kapasitas</label>
             <input 
               name="Kapasitas" 
               value={formData['Kapasitas']} 
@@ -150,13 +231,23 @@ function CreateClientContent() {
               className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" 
             />
           </div>
-           <div>
+          <div className="lg:col-span-1">
             <label className="block text-sm font-medium text-slate-700 mb-1">Sinyal RX (dBm)</label>
             <input 
               name="RX ONT/SFP" 
               value={formData['RX ONT/SFP']} 
               onChange={handleChange}
               placeholder="-20.5"
+              className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-700" 
+            />
+          </div>
+          <div className="lg:col-span-1">
+            <label className="block text-sm font-medium text-slate-700 mb-1">SN ONT</label>
+            <input 
+              name="SN ONT" 
+              value={formData['SN ONT']} 
+              onChange={handleChange}
+              placeholder="ZTEGC8..."
               className="w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none font-mono text-slate-700" 
             />
           </div>
@@ -199,6 +290,37 @@ function CreateClientContent() {
           </select>
         </div>
 
+        {/* GROUP 4: INFORMASI TAMBAHAN (UNTUK TXT) */}
+        <div className="bg-blue-50 p-5 rounded-lg border border-blue-100">
+          <h3 className="text-sm font-bold text-blue-800 uppercase mb-4 tracking-wider flex items-center gap-2">
+             <FileText size={16}/> Informasi Tambahan (Report TXT)
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Data Teknis (Detail)</label>
+              <textarea 
+                name="Data Teknis" 
+                rows={3}
+                placeholder="Isi detail teknis lainnya di sini..."
+                value={formData['Data Teknis']} 
+                onChange={handleChange}
+                className="w-full p-2.5 border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 text-sm font-mono" 
+              ></textarea>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-1">Konfigurasi</label>
+              <textarea 
+                name="Konfigurasi" 
+                rows={3}
+                placeholder="Paste konfigurasi router/switch di sini..."
+                value={formData['Konfigurasi']} 
+                onChange={handleChange}
+                className="w-full p-2.5 border border-blue-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 text-sm font-mono" 
+              ></textarea>
+            </div>
+          </div>
+        </div>
+
         {/* TOMBOL SAVE */}
         <div className="pt-4 border-t border-slate-100">
           <button 
@@ -207,7 +329,7 @@ function CreateClientContent() {
             className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg hover:shadow-blue-500/30 disabled:bg-slate-300 disabled:cursor-not-allowed"
           >
             {saving ? <Loader2 className="animate-spin" /> : <Save size={20} />}
-            {saving ? 'Menyimpan Data...' : 'Simpan Client Baru'}
+            {saving ? 'Menyimpan Data...' : 'Simpan & Download Report'}
           </button>
         </div>
 

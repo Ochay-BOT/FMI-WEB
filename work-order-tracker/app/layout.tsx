@@ -13,6 +13,9 @@ import {
   ShieldCheck, ShieldAlert 
 } from 'lucide-react';
 
+// --- 1. IMPORT GLOBAL BROADCAST ---
+import GlobalBroadcast from '@/components/GlobalBroadcast';
+
 // --- KOMPONEN SIDEBAR ITEM ---
 function SidebarItem({ href, icon, label, show = true }: { href: string, icon: any, label: string, show?: boolean }) {
   const pathname = usePathname();
@@ -98,6 +101,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body suppressHydrationWarning={true} className={`${isLoginPage ? 'bg-slate-900' : 'bg-slate-50'} min-h-screen font-sans ${isLoginPage ? '' : 'flex overflow-hidden'}`}>
+        
+        {/* --- 2. PASANG GLOBAL BROADCAST DISINI --- */}
+        {/* Ini akan muncul melayang di atas semua konten */}
+        <GlobalBroadcast />
         
         {isLoginPage ? (
           <main className="w-full h-full">{children}</main>
