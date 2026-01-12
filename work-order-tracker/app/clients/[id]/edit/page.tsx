@@ -3,13 +3,13 @@
 export const dynamic = 'force-dynamic';
 
 import { useState, useEffect, Suspense } from 'react';
-// 1. FIX IMPORT SUPABASE
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, useParams } from 'next/navigation';
 import { Save, ArrowLeft, Loader2, UserCog, Trash2 } from 'lucide-react';
-
-// 2. IMPORT LOGGER (Agar Edit juga kirim notif ke Telegram)
 import { logActivity } from '@/lib/logger';
+
+// --- 1. IMPORT TOAST (SONNER) ---
+import { toast } from 'sonner';
 
 function EditClientContent() {
   const router = useRouter();
@@ -48,7 +48,8 @@ function EditClientContent() {
         .single();
 
       if (error) {
-        alert('Gagal mengambil data: ' + error.message);
+        // GANTI ALERT JADI TOAST ERROR
+        toast.error('Gagal mengambil data: ' + error.message);
         router.push('/clients');
       } else if (data) {
         setFormData(data);
@@ -72,7 +73,7 @@ function EditClientContent() {
     const { error } = await supabase
       .from('Data Client Corporate')
       .update({
-        'Nama Pelanggan': formData['Nama Pelanggan'], // ID Pelanggan biasanya tidak boleh diubah sembarangan
+        'Nama Pelanggan': formData['Nama Pelanggan'], 
         'ALAMAT': formData['ALAMAT'],
         'VMAN / VLAN': formData['VMAN / VLAN'],
         'Near End': formData['Near End'],
@@ -84,12 +85,12 @@ function EditClientContent() {
       .eq('id', id);
 
     if (error) {
-      alert('Gagal update: ' + error.message);
+      // GANTI ALERT JADI TOAST ERROR
+      toast.error('Gagal update: ' + error.message);
       setSaving(false);
     } else {
       
       // --- LOGIC TELEGRAM / LOGGER ---
-      // Ambil user yang login untuk dicatat siapa yang mengedit
       const { data: { user } } = await supabase.auth.getUser();
       let actorName = 'System';
       if(user) {
@@ -97,40 +98,46 @@ function EditClientContent() {
          actorName = profile?.full_name || 'User';
       }
 
-      // Kirim Notifikasi
       await logActivity({
         activity: 'Edit Client Corp', 
         subject: formData['Nama Pelanggan'],
         actor: actorName
       });
 
-      alert('Data berhasil diperbarui!');
+      // GANTI ALERT JADI TOAST SUKSES
+      toast.success('Data Berhasil Diperbarui!', {
+        description: 'Perubahan telah tersimpan di sistem.',
+      });
+
       router.push('/clients'); 
       router.refresh();
     }
   };
 
-  // --- 3. LOGIC HAPUS CLIENT (OPSIONAL) ---
+  // --- 3. LOGIC HAPUS CLIENT ---
   const handleDelete = async () => {
+    // Confirm bawaan browser masih oke untuk tindakan kritis (safety)
     if(!confirm('⚠️ PERINGATAN: Yakin ingin MENGHAPUS client ini secara permanen?')) return;
     
     setSaving(true);
     const { error } = await supabase.from('Data Client Corporate').delete().eq('id', id);
     
     if(error) {
-       alert("Gagal hapus: " + error.message);
+       toast.error("Gagal hapus: " + error.message);
        setSaving(false);
     } else {
-       // Log Hapus ke Telegram
-       const { data: { user } } = await supabase.auth.getUser();
-       // (Logic ambil nama user disederhanakan)
+       // Log Hapus
        await logActivity({
           activity: 'Delete Client Corp',
           subject: formData['Nama Pelanggan'],
           actor: 'User'
        });
 
-       alert("Client berhasil dihapus.");
+       // TOAST SUKSES HAPUS
+       toast.success("Client Berhasil Dihapus", { 
+         description: "Data telah dihapus permanen dari database." 
+       });
+
        router.push('/clients');
        router.refresh();
     }
@@ -155,7 +162,7 @@ function EditClientContent() {
             </div>
         </div>
         
-        {/* Tombol Hapus (Merah) */}
+        {/* Tombol Hapus */}
         <button onClick={handleDelete} className="text-rose-500 hover:bg-rose-50 p-2 rounded-lg transition" title="Hapus Client">
             <Trash2 size={20}/>
         </button>
@@ -168,7 +175,6 @@ function EditClientContent() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">ID Pelanggan</label>
-              {/* ID dibuat ReadOnly agar tidak merusak relasi data */}
               <input 
                 name="ID Pelanggan" 
                 value={formData['ID Pelanggan'] || ''} 
@@ -258,7 +264,7 @@ function EditClientContent() {
   );
 }
 
-// Export Default dengan Suspense (Wajib di Next.js App Router utk Client Component yg pakai params/searchParams)
+// Export Default dengan Suspense
 export default function EditClientPage() {
   return (
     <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans">

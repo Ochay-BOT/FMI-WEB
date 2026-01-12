@@ -8,8 +8,11 @@ import { createBrowserClient } from '@supabase/ssr';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Save, ArrowLeft, Loader2, UserPlus, FileText } from 'lucide-react';
 
-// --- IMPORT LOGGER HELPER (Untuk DB & Telegram) ---
+// Import Logger Helper
 import { logActivity } from '@/lib/logger';
+
+// --- 1. IMPORT TOAST (SONNER) ---
+import { toast } from 'sonner';
 
 // --- BAGIAN 1: LOGIKA FORM DIPISAH KE SINI ---
 function CreateClientContent() {
@@ -98,15 +101,16 @@ ${data['Konfigurasi'] || '-'}
     e.preventDefault();
     setSaving(true);
 
-    // Validasi Sederhana
+    // Validasi Sederhana (GANTI ALERT JADI TOAST ERROR)
     if (!formData['ID Pelanggan'] || !formData['Nama Pelanggan']) {
-      alert('Wajib isi ID dan Nama Pelanggan!');
+      toast.error('Wajib isi ID dan Nama Pelanggan!', {
+        position: 'top-center'
+      });
       setSaving(false);
       return;
     }
 
     // Persiapan Data untuk Database
-    // HANYA kirim kolom yang benar-benar ada di tabel Database agar tidak error
     const dbPayload = {
         'ID Pelanggan': formData['ID Pelanggan'],
         'Nama Pelanggan': formData['Nama Pelanggan'],
@@ -117,7 +121,6 @@ ${data['Konfigurasi'] || '-'}
         'STATUS': formData['STATUS'],
         'Kapasitas': formData['Kapasitas'],
         'RX ONT/SFP': formData['RX ONT/SFP'],
-        // 'SN ONT', 'Data Teknis', 'Konfigurasi' TIDAK DIKIRIM ke DB (Kecuali kolomnya sudah kamu buat)
     };
 
     // Eksekusi Simpan ke Supabase
@@ -126,12 +129,12 @@ ${data['Konfigurasi'] || '-'}
       .insert([dbPayload]); 
 
     if (error) {
-      alert('Gagal menyimpan: ' + error.message);
+      // GANTI ALERT JADI TOAST ERROR
+      toast.error('Gagal menyimpan: ' + error.message);
       setSaving(false);
     } else {
       
       // --- INTEGRASI LOGGER (DB + TELEGRAM) ---
-      // 1. Ambil info user yang sedang login untuk dicatat sebagai 'actor'
       const { data: { user } } = await supabase.auth.getUser();
       let actorName = 'System';
       if(user) {
@@ -139,7 +142,6 @@ ${data['Konfigurasi'] || '-'}
         actorName = profile?.full_name || user.email || 'User';
       }
 
-      // 2. Panggil Helper Logger
       await logActivity({
         activity: 'Input Client Corp', 
         subject: formData['Nama Pelanggan'],
@@ -149,7 +151,12 @@ ${data['Konfigurasi'] || '-'}
       // --- DOWNLOAD TXT & REDIRECT ---
       downloadTxt(formData); 
 
-      alert('Client berhasil disimpan, Notifikasi Terkirim & Report TXT diunduh!');
+      // GANTI ALERT JADI TOAST SUKSES
+      toast.success('Client Berhasil Disimpan!', {
+        description: 'Laporan TXT sedang diunduh & Notifikasi terkirim.',
+        duration: 4000, // Muncul selama 4 detik
+      });
+
       router.push('/clients'); 
       router.refresh();
     }

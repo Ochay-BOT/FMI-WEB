@@ -9,6 +9,9 @@ import {
 import { format } from 'date-fns';
 import { id as indonesia } from 'date-fns/locale';
 
+// 1. IMPORT TOAST
+import { toast } from 'sonner';
+
 // --- SETUP SUPABASE ---
 const supabase = createBrowserClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -38,7 +41,6 @@ const TEMPLATES = [
 ];
 
 export default function BroadcastPage() {
-  // FIX: Tambahkan <any[]> agar tidak error "never[]" saat build
   const [history, setHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -61,6 +63,8 @@ export default function BroadcastPage() {
       if (!error) setHistory(data || []);
     } catch (err) {
       console.error("Fetch error:", err);
+      // GANTI ALERT JADI TOAST ERROR
+      toast.error("Gagal memuat riwayat broadcast");
     } finally {
       setLoading(false);
     }
@@ -71,10 +75,16 @@ export default function BroadcastPage() {
   // --- 2. HANDLERS ---
   const handleTemplate = (tmpl: any) => {
     setForm({ ...form, type: tmpl.type, title: tmpl.title, message: tmpl.text });
+    // Feedback visual kecil
+    toast.info('Template diterapkan', { duration: 2000 });
   };
 
   const handleSave = async () => {
-    if (!form.title || !form.message) return alert('Judul dan Pesan wajib diisi!');
+    if (!form.title || !form.message) {
+      // GANTI ALERT JADI TOAST ERROR
+      toast.error('Judul dan Pesan wajib diisi!');
+      return;
+    }
 
     const combinedMessage = `[${form.title}]\n\n${form.message}`;
 
@@ -84,28 +94,47 @@ export default function BroadcastPage() {
       sender: form.sender
     };
 
+    // Loading indicator sederhana saat proses kirim
+    const toastId = toast.loading('Mengirim broadcast...');
+
     const { error } = await supabase.from('Broadcasts').insert([payload]);
     
+    // Hapus loading
+    toast.dismiss(toastId);
+
     if (error) {
-      alert('Gagal simpan: ' + error.message);
+      // GANTI ALERT JADI TOAST ERROR
+      toast.error('Gagal simpan: ' + error.message);
     } else {
       fetchHistory();
-      alert('Broadcast berhasil disimpan!');
+      // GANTI ALERT JADI TOAST SUKSES
+      toast.success('Broadcast Terkirim!', {
+        description: 'Pesan akan muncul di dashboard semua user.'
+      });
       setForm({ ...form, title: '', message: '' }); 
     }
   };
 
   const handleDelete = async (id: any) => {
+    // Confirm bawaan masih oke untuk delete (safety)
     if(!confirm('Hapus log ini?')) return;
+    
     const { error } = await supabase.from('Broadcasts').delete().eq('id', id);
-    if (error) alert("Gagal hapus");
+    if (error) {
+       toast.error("Gagal hapus data");
+    } else {
+       toast.success("Log dihapus");
+    }
     fetchHistory();
   };
 
   const handleCopy = (title: string, msg: string) => {
     const textToCopy = `*${title}*\n\n${msg}\n\n_Regards,_\n*NOC System*`;
     navigator.clipboard.writeText(textToCopy);
-    alert('Teks disalin! Siap paste ke WhatsApp.');
+    // GANTI ALERT JADI TOAST SUKSES
+    toast.success('Disalin ke Clipboard!', {
+      description: 'Siap paste ke WhatsApp.'
+    });
   };
 
   const handleCopyFromHistory = (fullMessage: string) => {
@@ -115,7 +144,8 @@ export default function BroadcastPage() {
         textToCopy = `*${match[1]}*\n\n${match[2]}\n\n_Regards,_\n*NOC System*`;
     }
     navigator.clipboard.writeText(textToCopy);
-    alert('Teks disalin!');
+    // GANTI ALERT JADI TOAST SUKSES
+    toast.success('Teks disalin!');
   }
 
   return (

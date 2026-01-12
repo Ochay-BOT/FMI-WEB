@@ -1,215 +1,267 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+export const dynamic = 'force-dynamic';
+
+import { useEffect, useState, Suspense } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
-import { useParams, useRouter } from 'next/navigation'; 
-import Link from 'next/link'; 
-// PERBAIKAN: Menambahkan 'Server' ke dalam import
-import { ArrowLeft, MapPin, Activity, Router, Pencil, Trash2, Server } from 'lucide-react';
+import { useRouter, useParams } from 'next/navigation';
+import Link from 'next/link';
+import { 
+  ArrowLeft, Pencil, Trash2, MapPin, Activity, 
+  Server, Router, Loader2, Globe, AlertTriangle, X 
+} from 'lucide-react';
 
-export default function ClientDetailPage() {
-  const params = useParams(); 
-  const id = params.id;
+// IMPORT TOAST & LOGGER
+import { toast } from 'sonner';
+import { logActivity } from '@/lib/logger';
+
+function ClientDetailContent() {
+  const params = useParams();
+  const id = params.id as string;
   const router = useRouter();
-  
-  const [client, setClient] = useState(null);
+
+  const [client, setClient] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  
+  // STATE UNTUK MODAL KONFIRMASI
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  // Setup Supabase
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
-  // Ambil Data
+  // --- FETCH DATA ---
   useEffect(() => {
-    async function fetchDetail() {
-      if (!id) return;
+    async function fetchData() {
       const { data, error } = await supabase
         .from('Data Client Corporate')
         .select('*')
         .eq('id', id)
         .single();
 
-      if (error) console.error('Error:', error);
-      else setClient(data);
-      
+      if (error) {
+        toast.error('Gagal mengambil data: ' + error.message);
+        router.push('/clients');
+      } else {
+        setClient(data);
+      }
       setLoading(false);
     }
-    fetchDetail();
-  }, [id, supabase]);
+    if (id) fetchData();
+  }, [id, router]);
 
-  // --- LOGIC HAPUS DENGAN KONFIRMASI ---
-  const handleDelete = async () => {
-    const confirmDelete = window.confirm(
-      `BAHAYA! \n\nAnda yakin ingin MENGHAPUS data pelanggan ini?\nNama: ${client['Nama Pelanggan']}\n\nData yang dihapus tidak bisa dikembalikan!`
-    );
+  // --- EKSEKUSI DELETE (DIPANGGIL DARI MODAL) ---
+  const executeDelete = async () => {
+    setDeleting(true);
+    // Tutup modal biar bersih
+    setShowDeleteModal(false); 
+    
+    const toastId = toast.loading('Menghapus data permanen...');
 
-    if (confirmDelete) {
-      setIsDeleting(true);
+    const { error } = await supabase
+      .from('Data Client Corporate')
+      .delete()
+      .eq('id', id);
 
-      const { error } = await supabase
-        .from('Data Client Corporate')
-        .delete()
-        .eq('id', id);
-
-      if (error) {
-        alert('Gagal menghapus: ' + error.message);
-        setIsDeleting(false);
-      } else {
-        alert('Data berhasil dihapus selamanya.');
-        router.push('/clients'); 
-        router.refresh();
+    if (error) {
+      toast.error('Gagal menghapus: ' + error.message, { id: toastId });
+      setDeleting(false);
+    } else {
+      // LOG KE TELEGRAM
+      const { data: { user } } = await supabase.auth.getUser();
+      let actorName = 'System';
+      if(user) {
+         const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+         actorName = profile?.full_name || 'User';
       }
+
+      await logActivity({
+         activity: 'Delete Client Corp',
+         subject: client?.['Nama Pelanggan'] || 'Unknown',
+         actor: actorName
+      });
+
+      toast.success('Client Berhasil Dihapus', {
+        id: toastId,
+        description: 'Data telah dihapus permanen dari database.'
+      });
+      
+      router.push('/clients');
+      router.refresh();
     }
   };
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center text-slate-500">Memuat data...</div>;
-  if (!client) return <div className="min-h-screen flex items-center justify-center text-red-500">Data tidak ditemukan!</div>;
+  if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600"/></div>;
+  if (!client) return <div className="p-10 text-center">Data tidak ditemukan.</div>;
 
   return (
-    <div className="p-6 md:p-10 bg-slate-50 min-h-screen font-sans">
+    <div className="p-6 bg-slate-50 min-h-screen font-sans relative">
       
-      {/* HEADER */}
-      <div className="max-w-4xl mx-auto mb-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <button onClick={() => router.back()} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 transition-colors">
+      {/* --- MODAL KONFIRMASI CUSTOM --- */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 scale-100 animate-in zoom-in-95 duration-200">
+            
+            {/* Modal Header */}
+            <div className="p-6 text-center border-b border-slate-100">
+              <div className="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertTriangle size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-slate-800">Hapus Client Permanen?</h2>
+              <p className="text-sm text-slate-500 mt-2">
+                Anda akan menghapus data <span className="font-bold text-slate-700">{client['Nama Pelanggan']}</span>. 
+                Tindakan ini <span className="text-rose-600 font-bold">TIDAK BISA DIBATALKAN</span>.
+              </p>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-slate-50 flex gap-3">
+              <button 
+                onClick={() => setShowDeleteModal(false)}
+                className="flex-1 py-3 px-4 bg-white text-slate-700 border border-slate-200 rounded-xl font-bold hover:bg-slate-100 transition shadow-sm"
+              >
+                Batal
+              </button>
+              <button 
+                onClick={executeDelete}
+                className="flex-1 py-3 px-4 bg-rose-600 text-white rounded-xl font-bold hover:bg-rose-700 transition shadow-lg shadow-rose-500/20 flex justify-center items-center gap-2"
+              >
+                <Trash2 size={18} /> Ya, Hapus
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- HEADER HALAMAN --- */}
+      <div className="max-w-5xl mx-auto mb-6 flex items-center justify-between">
+        <button onClick={() => router.back()} className="flex items-center gap-2 text-slate-500 hover:text-blue-600 transition">
           <ArrowLeft size={20} /> Kembali
         </button>
 
         <div className="flex gap-3">
-          {/* TOMBOL EDIT */}
           <Link href={`/clients/${id}/edit`}>
-            <button className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 text-sm font-medium transition-colors border border-indigo-100 shadow-sm">
-              <Pencil size={16} /> Edit Data
+            <button className="px-4 py-2 bg-white border border-slate-200 text-blue-600 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-50 flex items-center gap-2 transition">
+              <Pencil size={16}/> Edit Data
             </button>
           </Link>
-
-          {/* TOMBOL HAPUS (MERAH) */}
+          
+          {/* TOMBOL HAPUS -> MEMBUKA MODAL */}
           <button 
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="flex items-center gap-2 px-4 py-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 text-sm font-medium transition-colors border border-rose-100 shadow-sm"
+            onClick={() => setShowDeleteModal(true)} 
+            disabled={deleting}
+            className="px-4 py-2 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg font-bold text-sm shadow-sm hover:bg-rose-100 flex items-center gap-2 transition disabled:opacity-50"
           >
-            {isDeleting ? 'Menghapus...' : <><Trash2 size={16} /> Hapus Pelanggan</>}
+            {deleting ? <Loader2 size={16} className="animate-spin"/> : <Trash2 size={16}/>}
+            {deleting ? 'Memproses...' : 'Hapus Client'}
           </button>
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="max-w-5xl mx-auto space-y-6">
         
-        {/* INFO UTAMA */}
+        {/* --- CARD UTAMA --- */}
         <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
-          {/* Hiasan Status Background */}
-          <div className={`absolute top-0 right-0 w-32 h-32 transform translate-x-16 -translate-y-16 rounded-full opacity-10 ${
-            (client['STATUS'] || '').toLowerCase().includes('active') ? 'bg-green-500' : 'bg-red-500'
-          }`}></div>
-
-          <div className="flex flex-col md:flex-row justify-between md:items-start gap-4 relative z-10">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-gradient-to-br from-blue-50 to-transparent rounded-bl-full opacity-50"></div>
+          
+          <div className="flex justify-between items-start relative z-10">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-bold text-slate-900">{client['Nama Pelanggan']}</h1>
-                <StatusBadge status={client['STATUS']} />
+                <h1 className="text-3xl font-bold text-slate-800">{client['Nama Pelanggan']}</h1>
+                <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide ${
+                  client['STATUS'] === 'Active' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'
+                }`}>
+                  {client['STATUS']}
+                </span>
               </div>
-              <p className="text-slate-500 font-mono text-lg flex items-center gap-2">
-                <span className="text-slate-300">#</span>
-                {client['ID Pelanggan']}
-              </p>
+              <p className="text-slate-400 font-mono text-sm"># {client['ID Pelanggan']}</p>
             </div>
             <div className="text-right">
-               <p className="text-xs text-slate-400 uppercase tracking-wider mb-1">Bandwidth</p>
-               <p className="text-xl font-bold text-blue-600">{client['Kapasitas'] || '-'}</p>
+              <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-1">Bandwidth</p>
+              <p className="text-2xl font-bold text-blue-600">{client['Kapasitas'] || '-'}</p>
             </div>
           </div>
         </div>
 
-        {/* DETAIL GRID */}
+        {/* --- GRID INFO --- */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           
-          {/* LOKASI */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 className="flex items-center gap-2 font-bold text-slate-800 mb-4 pb-2 border-b">
-              <MapPin size={18} className="text-blue-500" /> Informasi Lokasi
+          {/* INFORMASI LOKASI */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h3 className="text-sm font-bold text-blue-600 uppercase mb-6 flex items-center gap-2">
+              <MapPin size={18}/> Informasi Lokasi
             </h3>
             <div className="space-y-4">
-              <InfoRow label="Alamat Instalasi" value={client['ALAMAT']} />
-              <InfoRow label="Account Officer" value={client['Officer']} />
-            </div>
-          </div>
-
-          {/* TEKNIS */}
-          <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-            <h3 className="flex items-center gap-2 font-bold text-slate-800 mb-4 pb-2 border-b">
-              <Activity size={18} className="text-emerald-500" /> Data Teknis
-            </h3>
-            <div className="space-y-4">
-              <InfoRow label="VLAN / VMAN" value={client['VMAN / VLAN']} isMono />
-              <InfoRow label="Sinyal RX (dBm)" value={client['RX ONT/SFP']} isSignal />
-              <InfoRow label="Link MRTG" value={client['MRTG'] || 'Belum ada'} isLink />
-            </div>
-          </div>
-
-           {/* PERANGKAT */}
-           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 md:col-span-2">
-             <h3 className="flex items-center gap-2 font-bold text-slate-800 mb-4 pb-2 border-b">
-              <Router size={18} className="text-orange-500" /> Perangkat Terpasang
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="bg-slate-50 p-5 rounded-lg border border-slate-100 flex justify-between items-center">
-                <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase mb-1">Near End (POP)</p>
-                    <p className="font-mono font-medium text-slate-700 text-lg">{client['Near End'] || '-'}</p>
-                </div>
-                <Server className="text-slate-300" size={24}/>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Alamat Instalasi</label>
+                <p className="text-slate-700 font-medium leading-relaxed">{client['ALAMAT'] || '-'}</p>
               </div>
-              <div className="bg-slate-50 p-5 rounded-lg border border-slate-100 flex justify-between items-center">
+            </div>
+          </div>
+
+          {/* DATA TEKNIS */}
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+            <h3 className="text-sm font-bold text-emerald-600 uppercase mb-6 flex items-center gap-2">
+              <Activity size={18}/> Data Teknis
+            </h3>
+            <div className="space-y-5">
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase mb-1">Far End (CPE)</p>
-                    <p className="font-mono font-medium text-slate-700 text-lg">{client['Far End'] || '-'}</p>
+                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">VLAN / VMAN</label>
+                   <p className="text-slate-800 font-mono font-bold text-lg">{client['VMAN / VLAN'] || '-'}</p>
                 </div>
-                 <Router className="text-slate-300" size={24}/>
+                <div>
+                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Sinyal RX (dBm)</label>
+                   <p className={`font-mono font-bold text-lg ${
+                      parseFloat(client['RX ONT/SFP']) < -27 ? 'text-rose-500' : 'text-slate-800'
+                   }`}>
+                     {client['RX ONT/SFP'] || '-'}
+                   </p>
+                </div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Link MRTG</label>
+                <p className="text-slate-500 text-sm italic">Belum ada</p>
               </div>
             </div>
           </div>
 
         </div>
+
+        {/* --- PERANGKAT --- */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+           <h3 className="text-sm font-bold text-amber-600 uppercase mb-6 flex items-center gap-2">
+              <Router size={18}/> Perangkat Terpasang
+           </h3>
+           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
+                 <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Near End (POP)</label>
+                    <p className="text-slate-800 font-bold">{client['Near End'] || '-'}</p>
+                 </div>
+                 <Server size={24} className="text-slate-300"/>
+              </div>
+              <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-between">
+                 <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Far End (CPE)</label>
+                    <p className="text-slate-800 font-bold">{client['Far End'] || '-'}</p>
+                 </div>
+                 <Globe size={24} className="text-slate-300"/>
+              </div>
+           </div>
+        </div>
+
       </div>
     </div>
   );
 }
 
-// --- Helper Components ---
-
-function InfoRow({ label, value, isMono, isSignal, isLink }) {
+export default function ClientDetailPage() {
   return (
-    <div>
-      <p className="text-xs text-slate-400 mb-1">{label}</p>
-      {isSignal ? (
-         <span className={`font-mono font-bold ${parseFloat(value) < -27 ? 'text-red-600' : 'text-green-600'}`}>
-           {value || '-'}
-         </span>
-      ) : isLink && value !== 'Belum ada' ? (
-         <a href={value} target="_blank" className="text-blue-500 hover:underline truncate block text-sm font-medium">{value}</a>
-      ) : (
-        <p className={`text-slate-800 font-medium ${isMono ? 'font-mono text-blue-700' : ''}`}>
-          {value || '-'}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function StatusBadge({ status }) {
-  const s = (status || '').toLowerCase();
-  let color = 'bg-slate-100 text-slate-600 border-slate-200';
-  
-  if (s.includes('active') || s.includes('ok')) color = 'bg-green-100 text-green-700 border-green-200';
-  if (s.includes('suspend') || s.includes('isolir')) color = 'bg-red-100 text-red-700 border-red-200';
-  if (s.includes('dismantle')) color = 'bg-slate-200 text-slate-700 border-slate-300';
-  
-  return (
-    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase border ${color}`}>
-      {status || 'Unknown'}
-    </span>
+    <Suspense fallback={<div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-blue-600"/></div>}>
+      <ClientDetailContent />
+    </Suspense>
   );
 }

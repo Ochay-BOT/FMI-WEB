@@ -16,6 +16,9 @@ import {
 // --- 1. IMPORT GLOBAL BROADCAST ---
 import GlobalBroadcast from '@/components/GlobalBroadcast';
 
+// --- 2. IMPORT TOASTER (SONNER) ---
+import { Toaster } from 'sonner';
+
 // --- KOMPONEN SIDEBAR ITEM ---
 function SidebarItem({ href, icon, label, show = true }: { href: string, icon: any, label: string, show?: boolean }) {
   const pathname = usePathname();
@@ -102,8 +105,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body suppressHydrationWarning={true} className={`${isLoginPage ? 'bg-slate-900' : 'bg-slate-50'} min-h-screen font-sans ${isLoginPage ? '' : 'flex overflow-hidden'}`}>
         
-        {/* --- 2. PASANG GLOBAL BROADCAST DISINI --- */}
-        {/* Ini akan muncul melayang di atas semua konten */}
+        {/* --- 3. PASANG TOASTER DISINI (Agar muncul paling atas) --- */}
+        <Toaster richColors position="top-center" />
+
+        {/* --- 4. GLOBAL BROADCAST --- */}
         <GlobalBroadcast />
         
         {isLoginPage ? (

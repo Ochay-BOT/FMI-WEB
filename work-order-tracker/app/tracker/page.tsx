@@ -10,12 +10,15 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
+import { toast } from 'sonner'; // Tambahkan Toast biar error lebih rapi
 
 // Setup ApexCharts (No SSR)
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
+// --- FIX 1: UPDATE KEY MAPPING AGAR SESUAI DEFAULT STATE ---
+// Kunci di sini harus SAMA PERSIS dengan nilai awal useState
 const TABLE_MAP = {
-  'Berlangganan': 'Berlangganan 2026',
+  'Pelanggan Baru': 'Berlangganan 2026',         // SEBELUMNYA: 'Berlangganan' -> ERROR
   'Berhenti Langganan': 'Berhenti Berlangganan 2026',
   'Berhenti Sementara': 'Berhenti Sementara 2026',
   'Upgrade': 'Upgrade 2026',
@@ -23,7 +26,7 @@ const TABLE_MAP = {
 };
 
 export default function TrackerPage() {
-  // --- STATE UTAMA ---
+  // State default adalah 'Pelanggan Baru', jadi TABLE_MAP harus punya key 'Pelanggan Baru'
   const [selectedCategory, setSelectedCategory] = useState('Pelanggan Baru');
   const [dataList, setDataList] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
@@ -65,6 +68,15 @@ export default function TrackerPage() {
     // B. Ambil Data Table
     const tableName = TABLE_MAP[selectedCategory as keyof typeof TABLE_MAP];
     
+    // --- FIX 2: SAFETY CHECK (Anti Crash) ---
+    // Jika nama tabel tidak ketemu, hentikan proses jangan sampai Supabase error
+    if (!tableName) {
+        console.error("Mapping tabel tidak ditemukan untuk kategori:", selectedCategory);
+        toast.error(`Kategori '${selectedCategory}' belum di-mapping ke database.`);
+        setLoading(false);
+        return;
+    }
+
     const { data, error } = await supabase
       .from(tableName)
       .select('*')
@@ -72,6 +84,7 @@ export default function TrackerPage() {
 
     if (error) {
       console.error('Error fetching:', error);
+      toast.error("Gagal memuat data: " + error.message);
     } else {
       setDataList(data || []);
       processMainCharts(data || [], selectedCategory);
@@ -81,32 +94,37 @@ export default function TrackerPage() {
 
   // --- 2. FETCH GLOBAL STATS ---
   async function fetchGlobalStats() {
-    const [resPasang, resPutus, resCuti] = await Promise.all([
-      supabase.from('Berlangganan 2026').select('id, ISP, BTS'),
-      supabase.from('Berhenti Berlangganan 2026').select('id'),
-      supabase.from('Berhenti Sementara 2026').select('id')
-    ]);
-
-    const pasang = resPasang.data?.length || 0;
-    const putus = resPutus.data?.length || 0;
-    const cuti = resCuti.data?.length || 0;
+    // Kita bungkus try-catch biar aman
+    try {
+        const [resPasang, resPutus, resCuti] = await Promise.all([
+          supabase.from('Berlangganan 2026').select('id, ISP, BTS'),
+          supabase.from('Berhenti Berlangganan 2026').select('id'),
+          supabase.from('Berhenti Sementara 2026').select('id')
+        ]);
     
-    const ispMap: any = {};
-    const btsMap: any = {};
-
-    resPasang.data?.forEach(row => {
-      const isp = row.ISP || 'Unknown';
-      ispMap[isp] = (ispMap[isp] || 0) + 1;
-      const bts = row.BTS || 'Unknown';
-      btsMap[bts] = (btsMap[bts] || 0) + 1;
-    });
-
-    setGlobalStats({
-      pasang, putus, cuti,
-      netGrowth: pasang - putus,
-      byIsp: Object.keys(ispMap).map(k => ({ name: k, data: ispMap[k] })).sort((a,b) => b.data - a.data).slice(0, 15),
-      byBts: Object.keys(btsMap).map(k => ({ name: k, data: btsMap[k] })).sort((a,b) => b.data - a.data).slice(0, 15)
-    });
+        const pasang = resPasang.data?.length || 0;
+        const putus = resPutus.data?.length || 0;
+        const cuti = resCuti.data?.length || 0;
+        
+        const ispMap: any = {};
+        const btsMap: any = {};
+    
+        resPasang.data?.forEach(row => {
+          const isp = row.ISP || 'Unknown';
+          ispMap[isp] = (ispMap[isp] || 0) + 1;
+          const bts = row.BTS || 'Unknown';
+          btsMap[bts] = (btsMap[bts] || 0) + 1;
+        });
+    
+        setGlobalStats({
+          pasang, putus, cuti,
+          netGrowth: pasang - putus,
+          byIsp: Object.keys(ispMap).map(k => ({ name: k, data: ispMap[k] })).sort((a,b) => b.data - a.data).slice(0, 15),
+          byBts: Object.keys(btsMap).map(k => ({ name: k, data: btsMap[k] })).sort((a,b) => b.data - a.data).slice(0, 15)
+        });
+    } catch (err) {
+        console.error("Gagal load global stats", err);
+    }
   }
 
   useEffect(() => { fetchData(); }, [selectedCategory]);
@@ -157,9 +175,11 @@ export default function TrackerPage() {
   };
 
   const getSubject = (row: any) => {
+    // Helper subject yang lebih aman
     return row['SUBJECT BERLANGGANAN'] || row['SUBJECT BERHENTI BERLANGGANAN'] || 
            row['SUBJECT BERHENTI SEMENTARA'] || row['SUBJECT UPGRADE'] || 
-           row['SUBJECT DOWNGRADE'] || row['SUBJECT'] || '-'; 
+           row['SUBJECT DOWNGRADE'] || row['SUBJECT'] || 
+           row['NAMA PELANGGAN'] || '-'; 
   };
 
   const filteredData = dataList.filter(item => {

@@ -1,19 +1,25 @@
 'use client';
 
+export const dynamic = 'force-dynamic';
+
 import { useState, useEffect } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
 import { Save, ArrowLeft, Loader2, ClipboardList } from 'lucide-react';
 
+// 1. IMPORT TOAST & LOGGER
+import { toast } from 'sonner';
+import { logActivity } from '@/lib/logger';
+
 export default function CreateWOPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
-  const [teamList, setTeamList] = useState([]); // State untuk menyimpan daftar team
+  const [teamList, setTeamList] = useState<any[]>([]); // State untuk menyimpan daftar team
 
   const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL || '',      // Tambah || ''
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''  // Tambah || ''
-);
+    process.env.NEXT_PUBLIC_SUPABASE_URL || '',
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  );
 
   const [formData, setFormData] = useState({
     'TANGGAL': new Date().toISOString().split('T')[0], // Default hari ini
@@ -21,21 +27,20 @@ export default function CreateWOPage() {
     'STATUS': 'PROGRESS', // Default awal
     'JENIS WO': 'PERMANEN', // Default awal
     'KETERANGAN': '',
-    'SELESAI ACTION': '', // Nanti jadi date picker
+    'SELESAI ACTION': '', 
     'NAMA TEAM': ''
   });
 
-  // --- 1. FETCH DATA TEAM DARI TABLE 'Index' ---
+  // --- 1. FETCH DATA TEAM DARI TABLE 'Index' (Logic Lama Dipertahankan) ---
   useEffect(() => {
     async function fetchTeams() {
-      // Ambil kolom TEAM dari tabel Index
       const { data, error } = await supabase
         .from('Index')
         .select('TEAM')
-        .not('TEAM', 'is', null); // Pastikan tidak null
+        .not('TEAM', 'is', null);
 
       if (!error && data) {
-        // Hapus duplikat nama team (Unique)
+        // Hapus duplikat nama team
         const uniqueTeams = [...new Set(data.map(item => item.TEAM))];
         setTeamList(uniqueTeams);
         
@@ -48,19 +53,22 @@ export default function CreateWOPage() {
     fetchTeams();
   }, []);
 
-  const handleChange = (e) => {
+  const handleChange = (e: any) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  const handleSave = async (e) => {
+  const handleSave = async (e: any) => {
     e.preventDefault();
-    setSaving(true);
-
+    
+    // Validasi
     if (!formData['SUBJECT WO']) {
-      alert('Subject WO wajib diisi!');
-      setSaving(false);
+      toast.error('Subject WO wajib diisi!');
       return;
     }
+
+    setSaving(true);
+    // Tampilkan Loading Toast
+    const toastId = toast.loading('Menyimpan Work Order...');
 
     // 2. Simpan ke Database
     const { error } = await supabase
@@ -68,27 +76,50 @@ export default function CreateWOPage() {
       .insert([formData]);
 
     if (error) {
-      alert('Gagal menyimpan: ' + error.message);
+      toast.error('Gagal menyimpan: ' + error.message, { id: toastId });
       setSaving(false);
     } else {
       
-      // 3. LOGIC FLOW (Smart Redirect)
-      if (formData['STATUS'] === 'SOLVED') {
-        const isConfirmed = confirm('Work Order berstatus SOLVED! \nApakah Anda ingin lanjut input data ini ke Tracker Pelanggan?');
-        
-        if (isConfirmed) {
-          const subject = encodeURIComponent(formData['SUBJECT WO']);
-          router.push(`/tracker/create?subject=${subject}`);
+      // --- LOG KE TELEGRAM ---
+      const { data: { user } } = await supabase.auth.getUser();
+      let actorName = 'System';
+      if(user) {
+         const { data: profile } = await supabase.from('profiles').select('full_name').eq('id', user.id).single();
+         actorName = profile?.full_name || 'User';
+      }
+
+      await logActivity({
+         activity: 'Input Work Order',
+         subject: `${formData['JENIS WO']} - ${formData['SUBJECT WO']}`,
+         actor: actorName
+      });
+
+      // TOAST SUKSES
+      toast.success('Work Order Berhasil Disimpan!', {
+        id: toastId,
+        description: 'Data tercatat di sistem & notifikasi terkirim.'
+      });
+
+      // --- 3. LOGIC FLOW (Smart Redirect) ---
+      // Kita beri jeda sedikit agar toast sempat terbaca sebelum confirm/redirect
+      setTimeout(() => {
+        if (formData['STATUS'] === 'SOLVED') {
+          // Confirm bawaan browser lebih aman untuk flow control pindah halaman
+          const isConfirmed = confirm('Work Order berstatus SOLVED! \nApakah Anda ingin lanjut input data ini ke Tracker Pelanggan?');
+          
+          if (isConfirmed) {
+            const subject = encodeURIComponent(formData['SUBJECT WO']);
+            router.push(`/tracker/create?subject=${subject}`);
+          } else {
+            router.push('/work-orders');
+            router.refresh();
+          }
+
         } else {
           router.push('/work-orders');
           router.refresh();
         }
-
-      } else {
-        alert('Work Order berhasil disimpan!');
-        router.push('/work-orders');
-        router.refresh();
-      }
+      }, 500);
     }
   };
 
@@ -96,6 +127,7 @@ export default function CreateWOPage() {
     <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans">
       <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg border border-slate-200 p-8">
         
+        {/* HEADER */}
         <div className="flex items-center gap-4 mb-8 border-b pb-6">
           <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
             <ArrowLeft size={24} />
@@ -188,7 +220,7 @@ export default function CreateWOPage() {
             <label className="block text-sm font-bold text-slate-700 mb-1">Keterangan / Detail</label>
             <textarea 
               name="KETERANGAN" 
-              rows="3" 
+              rows={3}
               value={formData['KETERANGAN']} 
               onChange={handleChange}
               className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" 
@@ -196,11 +228,11 @@ export default function CreateWOPage() {
             ></textarea>
           </div>
 
-           {/* BARIS 5: WAKTU SELESAI (DATE PICKER) */}
+           {/* BARIS 5: WAKTU SELESAI */}
            <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Waktu Selesai (Jika Closed)</label>
               <input 
-                type="date"  // <--- UBAH JADI DATE
+                type="date"
                 name="SELESAI ACTION" 
                 value={formData['SELESAI ACTION']} 
                 onChange={handleChange} 

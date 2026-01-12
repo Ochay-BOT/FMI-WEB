@@ -4,13 +4,13 @@ import { useState } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
 import { Lock, Mail, Eye, EyeOff, Loader2, Globe } from 'lucide-react';
+import { toast } from 'sonner'; // 1. IMPORT TOAST
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   
   const router = useRouter();
   const supabase = createBrowserClient(
@@ -21,7 +21,9 @@ export default function LoginPage() {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    setError(null);
+
+    // 2. TOAST LOADING
+    const toastId = toast.loading('Memverifikasi akun...');
 
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -29,9 +31,18 @@ export default function LoginPage() {
     });
 
     if (error) {
-      setError(error.message);
       setLoading(false);
+      // 3. TOAST ERROR (Gantikan div merah)
+      toast.error('Login Gagal!', {
+        id: toastId, // Ganti loading jadi error
+        description: error.message === 'Invalid login credentials' ? 'Email atau Password salah.' : error.message
+      });
     } else {
+      // 4. TOAST SUCCESS
+      toast.success('Login Berhasil', {
+        id: toastId,
+        description: 'Selamat datang kembali di Dashboard NOC.'
+      });
       router.push('/');
       router.refresh();
     }
@@ -95,13 +106,6 @@ export default function LoginPage() {
                 </button>
               </div>
             </div>
-
-            {/* Error Message */}
-            {error && (
-              <div className="bg-red-500/10 border border-red-500/50 text-red-200 text-xs p-3 rounded-lg text-center animate-shake">
-                {error === 'Invalid login credentials' ? 'Email atau Password Salah!' : error}
-              </div>
-            )}
 
             {/* Submit Button */}
             <button
