@@ -23,7 +23,7 @@ const TABLE_OPTIONS = [
   { label: 'Downgrade Layanan', value: 'Downgrade 2026' },
 ];
 
-// --- BAGIAN 1: LOGIKA UTAMA DIPINDAH KE SINI ---
+// --- LOGIKA UTAMA ---
 function CreateTrackerContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -31,9 +31,8 @@ function CreateTrackerContent() {
 
   const [saving, setSaving] = useState(false);
   const [selectedTable, setSelectedTable] = useState(TABLE_OPTIONS[0].value);
-  const [showSuccessModal, setShowSuccessModal] = useState(false); // State Modal
+  const [showSuccessModal, setShowSuccessModal] = useState(false); 
   
-  // State untuk Data Dropdown
   const [options, setOptions] = useState({
     bts: [],
     isp: [],
@@ -45,6 +44,18 @@ function CreateTrackerContent() {
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   );
+
+  // --- FUNGSI HELPER: FORMAT TANGGAL INDONESIA ---
+  const formatTanggalIndo = (dateString: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('id-ID', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    }); // Hasil: "Selasa, 13 Januari 2026"
+  };
 
   const [formData, setFormData] = useState({
     'TANGGAL': new Date().toISOString().split('T')[0],
@@ -58,13 +69,11 @@ function CreateTrackerContent() {
     'REASON': ''
   });
 
-  // --- FETCH DATA MASTER (Index) ---
   useEffect(() => {
     async function fetchMasterData() {
       const { data, error } = await supabase.from('Index').select('*');
       
       if (!error && data) {
-        // Helper untuk ambil Unique Values & Filter Null/Empty
         // @ts-ignore
         const getUnique = (key) => [...new Set(data.map(item => item[key]).filter(x => x))];
 
@@ -79,7 +88,6 @@ function CreateTrackerContent() {
     fetchMasterData();
   }, []);
 
-  // Update subject jika berubah di URL
   useEffect(() => {
     if(subjectFromWO) setFormData(prev => ({ ...prev, 'SUBJECT BERLANGGANAN': subjectFromWO }));
   }, [subjectFromWO]);
@@ -91,7 +99,6 @@ function CreateTrackerContent() {
   const handleSave = async (e: any) => {
     e.preventDefault();
     
-    // VALIDASI
     if (!formData['SUBJECT BERLANGGANAN']) {
       toast.error('Nama Subject / Pelanggan wajib diisi!');
       return;
@@ -100,11 +107,14 @@ function CreateTrackerContent() {
     setSaving(true);
     const toastId = toast.loading('Menyimpan Data Tracker...');
 
-    // --- 1. PERSIAPAN DATA (MAPPING KOLOM OTOMATIS) ---
-    const payload: any = { ...formData };
+    // --- 1. PERSIAPAN DATA (MAPPING KOLOM & FORMAT TANGGAL) ---
+    // Gunakan fungsi formatTanggalIndo di sini sebelum masuk payload
+    const payload: any = { 
+      ...formData,
+      'TANGGAL': formatTanggalIndo(formData['TANGGAL']) 
+    };
 
-    // TENTUKAN NAMA KOLOM TARGET BERDASARKAN TABEL
-    let targetColumnName = 'SUBJECT BERLANGGANAN'; // Default
+    let targetColumnName = 'SUBJECT BERLANGGANAN'; 
 
     if (selectedTable === 'Berhenti Sementara 2026') {
         targetColumnName = 'SUBJECT BERHENTI SEMENTARA';
@@ -116,13 +126,11 @@ function CreateTrackerContent() {
         targetColumnName = 'SUBJECT UPGRADE';
     }
 
-    // JIKA NAMA KOLOM BEDA DENGAN DEFAULT, KITA TUKAR ISINYA
     if (targetColumnName !== 'SUBJECT BERLANGGANAN') {
         payload[targetColumnName] = payload['SUBJECT BERLANGGANAN'];
-        delete payload['SUBJECT BERLANGGANAN']; // Hapus key lama
+        delete payload['SUBJECT BERLANGGANAN']; 
     }
 
-    // Hapus REASON khusus untuk tabel Berlangganan (karena tidak ada kolomnya)
     if (selectedTable === 'Berlangganan 2026') {
         delete payload['REASON'];
     }
@@ -151,19 +159,15 @@ function CreateTrackerContent() {
     });
 
     // --- 4. FLOW LOGIC SETELAH SUKSES ---
-    
-    // KASUS A: Pelanggan Baru -> Tawarkan Input Data Client
     if (selectedTable === 'Berlangganan 2026') {
         toast.success('Tracker Tersimpan!', { id: toastId });
         setSaving(false);
-        setShowSuccessModal(true); // Munculkan Modal
+        setShowSuccessModal(true); 
     } 
-    // KASUS B: Berhenti Berlangganan/Sementara -> Update Status Client Otomatis
     else if (selectedTable.includes('Berhenti')) {
         const newStatus = selectedTable === 'Berhenti Berlangganan 2026' ? 'Dismantle' : 'Isolir';
         const targetName = formData['SUBJECT BERLANGGANAN'];
         
-        // Cari client berdasarkan nama (Fuzzy Search) dan update statusnya
         const { error: updateError } = await supabase.from('Data Client Corporate')
           .update({ 'STATUS': newStatus })
           .ilike('Nama Pelanggan', `%${targetName}%`); 
@@ -179,14 +183,12 @@ function CreateTrackerContent() {
         
         setTimeout(() => { router.push('/tracker'); router.refresh(); }, 1500);
     } 
-    // KASUS C: Default (Upgrade/Downgrade)
     else {
         toast.success('Data Berhasil Disimpan!', { id: toastId });
         setTimeout(() => { router.push('/tracker'); router.refresh(); }, 1000);
     }
   };
 
-  // Navigasi dari Modal
   const goToClientInput = () => {
     const name = encodeURIComponent(formData['SUBJECT BERLANGGANAN']);
     router.push(`/clients/create?name=${name}`);
@@ -199,13 +201,12 @@ function CreateTrackerContent() {
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans relative">
-      
-      {/* --- MODAL KONFIRMASI CUSTOM --- */}
+      {/* MODAL SUCCESS */}
       {showSuccessModal && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 scale-100 animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200">
             <div className="p-8 text-center">
-              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+              <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
                 <CheckCircle size={32} />
               </div>
               <h2 className="text-xl font-bold text-slate-800">Pelanggan Baru Dicatat!</h2>
@@ -214,16 +215,10 @@ function CreateTrackerContent() {
               </p>
             </div>
             <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col gap-3">
-              <button 
-                onClick={goToClientInput}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition shadow-lg shadow-blue-500/20 flex justify-center items-center gap-2"
-              >
+              <button onClick={goToClientInput} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold transition flex justify-center items-center gap-2">
                 <UserPlus size={18} /> Ya, Input Data Client
               </button>
-              <button 
-                onClick={goBackList}
-                className="w-full py-3 bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-xl font-bold transition flex justify-center items-center gap-2"
-              >
+              <button onClick={goBackList} className="w-full py-3 bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-xl font-bold transition flex justify-center items-center gap-2">
                 <List size={18} /> Tidak, Kembali ke List
               </button>
             </div>
@@ -231,9 +226,8 @@ function CreateTrackerContent() {
         </div>
       )}
 
-      {/* --- FORM UTAMA --- */}
+      {/* FORM UTAMA */}
       <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg border border-slate-200 p-8">
-        
         <div className="flex items-center gap-4 mb-8 border-b pb-6">
           <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
             <ArrowLeft size={24} />
@@ -247,7 +241,6 @@ function CreateTrackerContent() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
-          
           <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-6">
             <label className="block text-sm font-bold text-blue-800 mb-2">Pilih Kategori Transaksi</label>
             <select 
@@ -278,7 +271,6 @@ function CreateTrackerContent() {
               className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 font-medium" />
           </div>
 
-          {/* DROP DOWN GROUP 1 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">BTS</label>
@@ -288,7 +280,7 @@ function CreateTrackerContent() {
                 {options.bts.map((opt, i) => <option key={i} value={opt}>{opt}</option>)}
               </select>
             </div>
-              <div>
+            <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">ISP</label>
               <select name="ISP" value={formData['ISP']} onChange={handleChange} 
                 className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
@@ -298,9 +290,8 @@ function CreateTrackerContent() {
             </div>
           </div>
 
-          {/* DROP DOWN GROUP 2 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div>
+            <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Device / Perangkat</label>
               <select name="DEVICE" value={formData['DEVICE']} onChange={handleChange} 
                 className="w-full p-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white text-slate-700">
@@ -345,7 +336,7 @@ function CreateTrackerContent() {
   );
 }
 
-// --- BAGIAN 2: EXPORT DEFAULT (PEMBUNGKUS) ---
+// --- PEMBUNGKUS EXPORT DEFAULT ---
 export default function CreateTrackerPage() {
   return (
     <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans">

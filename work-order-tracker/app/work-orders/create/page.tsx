@@ -2,36 +2,51 @@
 
 export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { createBrowserClient } from '@supabase/ssr';
 import { useRouter } from 'next/navigation';
-import { Save, ArrowLeft, Loader2, ClipboardList } from 'lucide-react';
+import { 
+  Save, ArrowLeft, Loader2, ClipboardList, 
+  CheckCircle, TrendingUp, List 
+} from 'lucide-react'; // Tambah icon yang dibutuhkan modal
 
-// 1. IMPORT TOAST & LOGGER
 import { toast } from 'sonner';
 import { logActivity } from '@/lib/logger';
 
 export default function CreateWOPage() {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
-  const [teamList, setTeamList] = useState<any[]>([]); // State untuk menyimpan daftar team
+  const [teamList, setTeamList] = useState<any[]>([]); 
+  
+  // STATE BARU: Untuk kontrol Modal Custom
+  const [showSolvedModal, setShowSolvedModal] = useState(false);
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   );
 
+  const formatTanggalIndo = (dateString: string) => {
+    if (!dateString) return '';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('id-ID', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+  };
+
   const [formData, setFormData] = useState({
-    'TANGGAL': new Date().toISOString().split('T')[0], // Default hari ini
+    'TANGGAL': new Date().toISOString().split('T')[0], 
     'SUBJECT WO': '',
-    'STATUS': 'PROGRESS', // Default awal
-    'JENIS WO': 'PERMANEN', // Default awal
+    'STATUS': 'PROGRESS', 
+    'JENIS WO': 'PERMANEN', 
     'KETERANGAN': '',
     'SELESAI ACTION': '', 
     'NAMA TEAM': ''
   });
 
-  // --- 1. FETCH DATA TEAM DARI TABLE 'Index' (Logic Lama Dipertahankan) ---
   useEffect(() => {
     async function fetchTeams() {
       const { data, error } = await supabase
@@ -40,11 +55,8 @@ export default function CreateWOPage() {
         .not('TEAM', 'is', null);
 
       if (!error && data) {
-        // Hapus duplikat nama team
         const uniqueTeams = [...new Set(data.map(item => item.TEAM))];
         setTeamList(uniqueTeams);
-        
-        // Set default team ke pilihan pertama jika ada
         if (uniqueTeams.length > 0) {
           setFormData(prev => ({ ...prev, 'NAMA TEAM': uniqueTeams[0] }));
         }
@@ -60,27 +72,29 @@ export default function CreateWOPage() {
   const handleSave = async (e: any) => {
     e.preventDefault();
     
-    // Validasi
     if (!formData['SUBJECT WO']) {
       toast.error('Subject WO wajib diisi!');
       return;
     }
 
     setSaving(true);
-    // Tampilkan Loading Toast
     const toastId = toast.loading('Menyimpan Work Order...');
 
-    // 2. Simpan ke Database
+    const payload = {
+      ...formData,
+      'TANGGAL': formatTanggalIndo(formData['TANGGAL']), 
+      'SELESAI ACTION': formData['SELESAI ACTION'] ? formatTanggalIndo(formData['SELESAI ACTION']) : '' 
+    };
+
     const { error } = await supabase
       .from('Report Bulanan')
-      .insert([formData]);
+      .insert([payload]);
 
     if (error) {
       toast.error('Gagal menyimpan: ' + error.message, { id: toastId });
       setSaving(false);
     } else {
       
-      // --- LOG KE TELEGRAM ---
       const { data: { user } } = await supabase.auth.getUser();
       let actorName = 'System';
       if(user) {
@@ -89,45 +103,78 @@ export default function CreateWOPage() {
       }
 
       await logActivity({
-         activity: 'Input Work Order',
-         subject: `${formData['JENIS WO']} - ${formData['SUBJECT WO']}`,
-         actor: actorName
+          activity: 'Input Work Order',
+          subject: `${formData['JENIS WO']} - ${formData['SUBJECT WO']}`,
+          actor: actorName
       });
 
-      // TOAST SUKSES
-      toast.success('Work Order Berhasil Disimpan!', {
-        id: toastId,
-        description: 'Data tercatat di sistem & notifikasi terkirim.'
-      });
+      // Hapus toast loading agar tidak numpuk
+      toast.dismiss(toastId);
 
-      // --- 3. LOGIC FLOW (Smart Redirect) ---
-      // Kita beri jeda sedikit agar toast sempat terbaca sebelum confirm/redirect
-      setTimeout(() => {
-        if (formData['STATUS'] === 'SOLVED') {
-          // Confirm bawaan browser lebih aman untuk flow control pindah halaman
-          const isConfirmed = confirm('Work Order berstatus SOLVED! \nApakah Anda ingin lanjut input data ini ke Tracker Pelanggan?');
-          
-          if (isConfirmed) {
-            const subject = encodeURIComponent(formData['SUBJECT WO']);
-            router.push(`/tracker/create?subject=${subject}`);
-          } else {
-            router.push('/work-orders');
-            router.refresh();
-          }
-
-        } else {
-          router.push('/work-orders');
-          router.refresh();
-        }
-      }, 500);
+      // --- LOGIC BARU DENGAN MODAL ---
+      if (formData['STATUS'] === 'SOLVED') {
+        // Jika status SOLVED, jangan redirect dulu. Tampilkan Modal.
+        setSaving(false); // Stop loading di tombol
+        setShowSolvedModal(true); 
+      } else {
+        // Jika status PROGRESS/PENDING, langsung redirect biasa
+        toast.success('Work Order Disimpan!');
+        router.push('/work-orders');
+        router.refresh();
+      }
     }
   };
 
+  // --- ACTIONS DARI MODAL ---
+  const handleGoToTracker = () => {
+    const subject = encodeURIComponent(formData['SUBJECT WO']);
+    router.push(`/tracker/create?subject=${subject}`);
+  };
+
+  const handleBackToList = () => {
+    router.push('/work-orders');
+    router.refresh();
+  };
+
   return (
-    <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans">
+    <div className="min-h-screen bg-slate-50 p-6 flex justify-center items-start font-sans relative">
+      
+      {/* --- CUSTOM MODAL (Pengganti Confirm) --- */}
+      {showSolvedModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden border border-slate-200 scale-100 animate-in zoom-in-95 duration-200">
+            <div className="p-8 text-center">
+              <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                <CheckCircle size={32} />
+              </div>
+              <h2 className="text-xl font-bold text-slate-800">Work Order Solved!</h2>
+              <p className="text-slate-500 mt-2 text-sm leading-relaxed">
+                Data berhasil disimpan. Apakah Anda ingin lanjut memasukkan data ini ke <strong>Tracker Pelanggan</strong>?
+              </p>
+            </div>
+            
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-col gap-3">
+              <button 
+                onClick={handleGoToTracker}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition shadow-lg shadow-emerald-500/20 flex justify-center items-center gap-2"
+              >
+                <TrendingUp size={18} /> Ya, Input ke Tracker
+              </button>
+              
+              <button 
+                onClick={handleBackToList}
+                className="w-full py-3 bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 rounded-xl font-bold transition flex justify-center items-center gap-2"
+              >
+                <List size={18} /> Tidak, Kembali ke List
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FORM UTAMA */}
       <div className="w-full max-w-3xl bg-white rounded-xl shadow-lg border border-slate-200 p-8">
         
-        {/* HEADER */}
         <div className="flex items-center gap-4 mb-8 border-b pb-6">
           <button onClick={() => router.back()} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-500">
             <ArrowLeft size={24} />
@@ -141,8 +188,6 @@ export default function CreateWOPage() {
         </div>
 
         <form onSubmit={handleSave} className="space-y-6">
-          
-          {/* BARIS 1: TANGGAL & STATUS */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Tanggal</label>
@@ -170,7 +215,6 @@ export default function CreateWOPage() {
             </div>
           </div>
 
-          {/* BARIS 2: SUBJECT */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">Subject WO <span className="text-red-500">*</span></label>
             <input 
@@ -183,7 +227,6 @@ export default function CreateWOPage() {
             />
           </div>
 
-          {/* BARIS 3: JENIS WO & NAMA TEAM */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
              <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Jenis WO</label>
@@ -215,7 +258,6 @@ export default function CreateWOPage() {
             </div>
           </div>
 
-          {/* BARIS 4: KETERANGAN */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">Keterangan / Detail</label>
             <textarea 
@@ -228,7 +270,6 @@ export default function CreateWOPage() {
             ></textarea>
           </div>
 
-           {/* BARIS 5: WAKTU SELESAI */}
            <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">Waktu Selesai (Jika Closed)</label>
               <input 
@@ -240,7 +281,6 @@ export default function CreateWOPage() {
               />
             </div>
 
-          {/* TOMBOL SIMPAN */}
           <div className="pt-4 border-t border-slate-100">
             <button 
               type="submit" 
