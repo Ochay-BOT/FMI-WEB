@@ -7,9 +7,11 @@ import Link from 'next/link';
 import { 
   Users, Server, ArrowUpRight, Clock, 
   Sun, Moon, CalendarDays, Inbox, CheckCircle2, ArrowRight,
-  Download, X, ListTodo 
+  Download, X, ListTodo, BarChart3, TrendingUp, ArrowDownRight, MinusCircle, 
+  AlertTriangle, Calendar, ChevronLeft, ChevronRight, ExternalLink // SUDAH DITAMBAHKAN
 } from 'lucide-react';
 import { format, getISOWeek } from 'date-fns'; 
+import { id as indonesia } from 'date-fns/locale';
 import { Role } from '@/lib/permissions';
 
 import AlertBanner from '@/components/AlertBanner';
@@ -35,11 +37,20 @@ export default function Dashboard() {
   });
 
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
-  const [chartSeries, setChartSeries] = useState<any[]>([]);
   
+  // STATE BARU CHART
+  const [chartTab, setChartTab] = useState<'CLIENT' | 'CAPACITY'>('CLIENT');
+  const [chartData, setChartData] = useState<any>({ client: [], capacity: [] });
+  const [chartSummary, setChartSummary] = useState({ pasang: 0, putus: 0, cuti: 0, upgrade: 0, downgrade: 0 });
+  
+  // STATE BANNER & MODAL
+  const [pendingWOs, setPendingWOs] = useState<any[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0); 
+  const [showAllWOModal, setShowAllWOModal] = useState(false);
+
   // STATE INBOX
   const [myTasks, setMyTasks] = useState<any[]>([]);
-  const [showInbox, setShowInbox] = useState(false); // <--- State untuk buka/tutup Overlay
+  const [showInbox, setShowInbox] = useState(false); 
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -67,20 +78,13 @@ export default function Dashboard() {
 
       // Logic Inbox
       if (currentUserName) {
-        const { data: tasks } = await supabase
-          .from('Report Bulanan')
-          .select('*')
-          .eq('NAMA TEAM', currentUserName)
-          .not('STATUS', 'in', '("SOLVED","CLOSED")')
-          .order('TANGGAL', { ascending: false });
+        const { data: tasks } = await supabase.from('Report Bulanan').select('*').eq('NAMA TEAM', currentUserName).not('STATUS', 'in', '("SOLVED","CLOSED")').order('TANGGAL', { ascending: false });
         if (tasks) setMyTasks(tasks);
       }
 
-      // Stats Lainnya
-      const { data: clients } = await supabase.from('Data Client Corporate').select('STATUS');
-      const totalClient = clients?.length || 0;
-      const activeClient = clients?.filter(c => (c.STATUS || '').toLowerCase().includes('active')).length || 0;
-
+      // Stats
+      const { count: clientCount } = await supabase.from('Data Client Corporate').select('*', { count: 'exact', head: true });
+      
       const vlanTables = ['Daftar Vlan 1-1000', 'Daftar Vlan 1000+', 'Daftar Vlan 2000+', 'Daftar Vlan 3000+'];
       const vlanResults = await Promise.all(vlanTables.map(table => supabase.from(table).select('NAME')));
       let vlanUsed = 0, vlanTotal = 0;
@@ -90,24 +94,41 @@ export default function Dashboard() {
         vlanUsed += d.filter(r => r.NAME && r.NAME !== '-' && r.NAME !== 'AVAILABLE').length;
       });
 
-      const { data: pasang } = await supabase.from('Berlangganan 2026').select('TANGGAL');
-      const { data: putus } = await supabase.from('Berhenti Berlangganan 2026').select('TANGGAL');
-      
-      const sPasang = new Array(12).fill(0);
-      const sPutus = new Array(12).fill(0);
-      pasang?.forEach(r => { if(r.TANGGAL) sPasang[new Date(r.TANGGAL).getMonth()]++; });
-      putus?.forEach(r => { if(r.TANGGAL) sPutus[new Date(r.TANGGAL).getMonth()]++; });
+      // Chart Data
+      const tables = ['Berlangganan 2026', 'Berhenti Berlangganan 2026', 'Berhenti Sementara 2026', 'Upgrade 2026', 'Downgrade 2026'];
+      const responses = await Promise.all(tables.map(t => supabase.from(t).select('TANGGAL')));
+      const groupByMonth = (data: any[]) => {
+        const months = new Array(12).fill(0);
+        data?.forEach(row => { if (row.TANGGAL) months[new Date(row.TANGGAL).getMonth()]++; });
+        return months;
+      };
+      const d1 = groupByMonth(responses[0].data || []); // Pasang
+      const d2 = groupByMonth(responses[1].data || []); // Putus
+      const d3 = groupByMonth(responses[2].data || []); // Cuti
+      const d4 = groupByMonth(responses[3].data || []); // Upgrade
+      const d5 = groupByMonth(responses[4].data || []); // Downgrade
 
-      setChartSeries([{ name: 'Berlangganan', data: sPasang }, { name: 'Berhenti Berlangganan', data: sPutus }]);
+      setChartData({
+        client: [{ name: 'Pasang Baru', data: d1 }, { name: 'Berhenti', data: d2 }, { name: 'Cuti', data: d3 }],
+        capacity: [{ name: 'Upgrade', data: d4 }, { name: 'Downgrade', data: d5 }]
+      });
+      setChartSummary({
+        pasang: d1.reduce((a, b) => a + b, 0), putus: d2.reduce((a, b) => a + b, 0), cuti: d3.reduce((a, b) => a + b, 0),
+        upgrade: d4.reduce((a, b) => a + b, 0), downgrade: d5.reduce((a, b) => a + b, 0),
+      });
 
+      // Logs & Pending WO
       const today = new Date().toISOString().slice(0, 10);
       const { data: logs } = await supabase.from('Log_Aktivitas').select('*').order('created_at', { ascending: false }).limit(5);
       const { count: countToday } = await supabase.from('Log_Aktivitas').select('id', { count: 'exact', head: true }).gte('created_at', today + 'T00:00:00');
+      const { data: allPending } = await supabase.from('Report Bulanan').select('*').in('STATUS', ['PENDING', 'OPEN', 'PROGRESS', 'ON PROGRESS']).order('id', { ascending: false }).limit(50);
+      if (allPending) setPendingWOs(allPending);
 
       setStats({
-        totalClient, activeClient,
+        totalClient: clientCount || 0, activeClient: 0,
         totalVlanUsed: vlanUsed, totalVlanFree: vlanTotal - vlanUsed,
-        growthMonth: sPasang[new Date().getMonth()], logsToday: countToday || 0
+        growthMonth: d1[new Date().getMonth()],
+        logsToday: countToday || 0
       });
       setRecentLogs(logs || []);
 
@@ -117,7 +138,7 @@ export default function Dashboard() {
 
   useEffect(() => { fetchDashboardData(); }, []);
 
-  // --- DOWNLOAD TXT ---
+  // --- LOGIC LAIN ---
   const handleDownloadInbox = () => {
     if (myTasks.length === 0) return alert("Tidak ada tugas.");
     let content = `TO DO LIST - ${userFullName}\nGenerated: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n==========================\n\n`;
@@ -130,23 +151,33 @@ export default function Dashboard() {
     link.click();
   };
 
+  const handleNext = () => setCurrentIndex((prev) => (prev + 1) % pendingWOs.length);
+  const handlePrev = () => setCurrentIndex((prev) => (prev - 1 + pendingWOs.length) % pendingWOs.length);
+  const currentBannerWO = pendingWOs.length > 0 ? pendingWOs[currentIndex] : null;
+
   const chartOptions: any = {
-    chart: { type: 'area', toolbar: { show: false }, fontFamily: 'inherit' },
-    colors: ['#10b981', '#ef4444'],
-    stroke: { curve: 'smooth', width: 2 },
-    xaxis: { categories: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] },
-    grid: { borderColor: '#f1f5f9', strokeDashArray: 4 },
-    fill: { type: 'gradient', gradient: { shadeIntensity: 1, opacityFrom: 0.4, opacityTo: 0.05, stops: [0, 90, 100] } },
-    legend: { position: 'top', horizontalAlign: 'right' },
-    dataLabels: { enabled: false }
+    chart: { type: 'bar', toolbar: { show: false }, fontFamily: 'inherit', stacked: false },
+    colors: chartTab === 'CLIENT' ? ['#10b981', '#ef4444', '#f59e0b'] : ['#3b82f6', '#64748b'],
+    plotOptions: { bar: { horizontal: false, columnWidth: '55%', borderRadius: 4 } },
+    dataLabels: { enabled: false },
+    stroke: { show: true, width: 2, colors: ['transparent'] },
+    xaxis: { categories: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'], labels: { style: { colors: '#0f172a', fontSize: '12px', fontWeight: 800 } } },
+    yaxis: { show: false },
+    grid: { show: true, borderColor: '#f1f5f9' },
+    legend: { position: 'top', horizontalAlign: 'right', fontWeight: 700, labels: { colors: '#334155' } },
+    tooltip: { theme: 'light' }
   };
 
+  // --- 1. SKELETON LOADING VIEW (TAMPIL SAAT LOADING) ---
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
+
+  // --- 2. MAIN DASHBOARD VIEW ---
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans relative">
-      
       <AlertBanner />
 
-      {/* STATISTIK UTAMA */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 mt-6">
         <StatCard title="Total Client" value={stats.totalClient} sub={`Active: ${stats.activeClient}`} icon={<Users size={24} />} color="blue" />
         <StatCard title="VLAN Usage" value={stats.totalVlanUsed} sub={`Free: ${stats.totalVlanFree}`} icon={<Server size={24} />} color="purple" />
@@ -154,23 +185,50 @@ export default function Dashboard() {
         <StatCard title="Logs Today" value={stats.logsToday} sub="System Events" icon={<Clock size={24} />} color="orange" />
       </div>
 
-      {/* CHART & JADWAL */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-bold text-slate-800 text-lg">Client Growth</h3>
+        {/* CHART SECTION */}
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col">
+          <div className="p-6 pb-0">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                <div>
+                    <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
+                    {chartTab === 'CLIENT' ? <Users size={20} className="text-emerald-600"/> : <BarChart3 size={20} className="text-blue-600"/>}
+                    {chartTab === 'CLIENT' ? 'Pertumbuhan Pelanggan' : 'Pertumbuhan Kapasitas'}
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">Data statistik tahun 2026</p>
+                </div>
+                <div className="flex bg-slate-100 p-1 rounded-xl">
+                    <button onClick={() => setChartTab('CLIENT')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${chartTab === 'CLIENT' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Client Growth</button>
+                    <button onClick={() => setChartTab('CAPACITY')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${chartTab === 'CAPACITY' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Capacity</button>
+                </div>
+            </div>
+            <div className="flex-1 min-h-[280px]">
+                <ReactApexChart options={chartOptions} series={chartTab === 'CLIENT' ? chartData.client : chartData.capacity} type="bar" height={280} />
+            </div>
           </div>
-          <div className="flex-1 min-h-[300px]">
-            {!loading && <ReactApexChart options={chartOptions} series={chartSeries} type="area" height="100%" />}
+          <div className="mt-auto bg-slate-50 border-t border-slate-100 p-6 rounded-b-xl">
+             <div className="grid grid-cols-3 gap-4">
+               {chartTab === 'CLIENT' ? (
+                 <>
+                   <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Pasang</p><div className="flex items-center gap-2"><span className="p-1 bg-emerald-100 text-emerald-600 rounded"><ArrowUpRight size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.pasang}</span></div></div>
+                   <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Putus</p><div className="flex items-center gap-2"><span className="p-1 bg-rose-100 text-rose-600 rounded"><ArrowDownRight size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.putus}</span></div></div>
+                   <div className="bg-white p-3 rounded-xl border border-amber-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Sedang Cuti</p><div className="flex items-center gap-2"><span className="p-1 bg-amber-100 text-amber-600 rounded"><MinusCircle size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.cuti}</span></div></div>
+                 </>
+               ) : (
+                 <>
+                   <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Upgrade</p><div className="flex items-center gap-2"><span className="p-1 bg-blue-100 text-blue-600 rounded"><TrendingUp size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.upgrade}</span></div></div>
+                   <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Downgrade</p><div className="flex items-center gap-2"><span className="p-1 bg-slate-100 text-slate-600 rounded"><TrendingUp size={14} className="rotate-180"/></span><span className="text-xl font-black text-slate-800">{chartSummary.downgrade}</span></div></div>
+                 </>
+               )}
+             </div>
           </div>
         </div>
 
+        {/* SCHEDULE & LOGS */}
         <div className="flex flex-col gap-6">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
             <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <CalendarDays size={18} className="text-blue-600"/> Jadwal Minggu Ini
-              </h3>
+              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Calendar size={18} className="text-blue-600"/> Jadwal Minggu Ini</h3>
               <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-mono">Week {getISOWeek(new Date())}</span>
             </div>
             <div className="space-y-4">
@@ -198,101 +256,71 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ======================================================== */}
-      {/* FLOATING BUTTON & OVERLAY INBOX  (BAGIAN BARU)          */}
-      {/* ======================================================== */}
-      
-      {/* 1. FLOATING BUTTON (POJOK KANAN BAWAH) */}
-      <button 
-        onClick={() => setShowInbox(true)}
-        className="fixed bottom-6 right-6 z-40 bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-2xl shadow-blue-500/40 transition-transform active:scale-90 flex items-center justify-center group"
-      >
+      {/* --- BANNER WO & MODAL LIHAT SEMUA --- */}
+      {currentBannerWO && (
+        <div className="fixed bottom-6 left-6 z-30 max-w-md w-full bg-white border-l-4 border-rose-600 rounded-r-xl shadow-2xl animate-in slide-in-from-bottom-10 duration-500 hidden md:block">
+           <div className="p-4 relative">
+              <button onClick={() => setShowAllWOModal(true)} className="absolute top-2 right-2 text-slate-400 hover:text-slate-600"><ExternalLink size={16}/></button>
+              <div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded uppercase">Urgent WO</span><span className="text-[10px] font-mono text-slate-400">{currentIndex + 1}/{pendingWOs.length}</span></div>
+              <h4 className="font-bold text-sm text-slate-900 line-clamp-1">{currentBannerWO['SUBJECT WO']}</h4>
+              <p className="text-xs text-slate-500 mt-1 line-clamp-1 italic">{currentBannerWO['KETERANGAN']}</p>
+              <div className="flex justify-between items-center mt-3">
+                 <div className="flex gap-1"><button onClick={handlePrev} className="p-1 hover:bg-slate-100 rounded"><ChevronLeft size={16}/></button><button onClick={handleNext} className="p-1 hover:bg-slate-100 rounded"><ChevronRight size={16}/></button></div>
+                 <Link href={`/work-orders/${currentBannerWO.id}`} className="text-xs font-bold text-rose-600 hover:underline">Tangani Sekarang</Link>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {showAllWOModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+              <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+                 <div><h3 className="text-lg font-bold text-slate-800 flex items-center gap-2"><AlertTriangle size={20} className="text-rose-600"/> Daftar WO Pending</h3><p className="text-xs text-slate-500 mt-1">Total {pendingWOs.length} Work Order.</p></div>
+                 <button onClick={() => setShowAllWOModal(false)} className="p-2 hover:bg-slate-200 rounded-full transition"><X size={20}/></button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-slate-50/50">
+                 {pendingWOs.map((wo) => (
+                    <div key={wo.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-rose-300 transition flex justify-between items-center">
+                       <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200 uppercase">{wo.STATUS}</span><span className="text-[10px] font-mono text-slate-400">#{wo.id}</span></div><h4 className="font-bold text-slate-800 text-sm mb-1">{wo['SUBJECT WO']}</h4></div>
+                       <Link href={`/work-orders/${wo.id}`}><button className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition">Detail</button></Link>
+                    </div>
+                 ))}
+              </div>
+              <div className="p-4 border-t border-slate-100 bg-white flex justify-end"><button onClick={() => setShowAllWOModal(false)} className="px-6 py-2 bg-slate-800 text-white rounded-lg font-bold text-sm hover:bg-slate-900 transition">Tutup</button></div>
+           </div>
+        </div>
+      )}
+
+      {/* FLOATING INBOX (TETAP ADA) */}
+      <button onClick={() => setShowInbox(true)} className="fixed bottom-6 right-6 z-40 bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-2xl shadow-blue-500/40 transition-transform active:scale-90 flex items-center justify-center group">
         <ListTodo size={28} />
-        {myTasks.length > 0 && (
-          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 flex items-center justify-center rounded-full border-2 border-slate-50 animate-bounce">
-            {myTasks.length}
-          </span>
-        )}
-        {/* Tooltip Hover */}
-        <span className="absolute right-full mr-4 bg-slate-800 text-white text-xs px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-          Tugas Saya ({myTasks.length})
-        </span>
+        {myTasks.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 flex items-center justify-center rounded-full border-2 border-slate-50 animate-bounce">{myTasks.length}</span>}
       </button>
 
-      {/* 2. OVERLAY MODAL */}
+      {/* INBOX MODAL */}
       {showInbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col max-h-[85vh]">
-            
-            {/* Modal Header */}
             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                  <Inbox className="text-blue-600" /> Inbox Tugas
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">Daftar WO yang ditugaskan kepada Anda.</p>
-              </div>
-              <button onClick={() => setShowInbox(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500">
-                <X size={24} />
-              </button>
+              <div><h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Inbox className="text-blue-600" /> Inbox Tugas</h2><p className="text-xs text-slate-500 mt-1">Tugas Anda.</p></div>
+              <button onClick={() => setShowInbox(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X size={24} /></button>
             </div>
-
-            {/* Modal Content (List) */}
             <div className="flex-1 overflow-y-auto p-2">
-              {myTasks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                  <CheckCircle2 size={64} className="mb-4 text-emerald-100" />
-                  <p className="font-bold text-slate-600">Semua Beres!</p>
-                  <p className="text-xs">Tidak ada tugas pending saat ini.</p>
-                </div>
-              ) : (
-                <div className="space-y-3 p-2">
-                  {myTasks.map((task) => (
-                    <div key={task.id} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-400 hover:shadow-md transition-all group relative">
-                      <div className="flex justify-between items-start mb-2">
-                         <span className="text-[10px] font-mono text-slate-400 flex items-center gap-1 bg-slate-50 px-2 py-1 rounded">
-                           <Clock size={10}/> {task.TANGGAL ? format(new Date(task.TANGGAL), 'dd MMM yyyy') : '-'}
-                         </span>
-                         <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-200">
-                            {task.STATUS}
-                         </span>
-                      </div>
-                      <h3 className="font-bold text-slate-800 text-sm mb-1 pr-10">{task['SUBJECT WO']}</h3>
-                      <p className="text-xs text-slate-500 line-clamp-2 bg-slate-50 p-2 rounded-lg border border-slate-100 italic">
-                        {task.KETERANGAN || 'Tidak ada keterangan tambahan.'}
-                      </p>
-                      
-                      <div className="mt-4 flex justify-end">
-                        <Link 
-                          href={`/work-orders?search=${task.id}`} 
-                          className="bg-slate-900 text-white text-xs px-4 py-2 rounded-lg font-bold hover:bg-blue-600 transition-colors flex items-center gap-2"
-                        >
-                          Kerjakan Sekarang <ArrowRight size={14} />
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+              {myTasks.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-slate-400"><CheckCircle2 size={64} className="mb-4 text-emerald-100" /><p className="font-bold text-slate-600">Beres!</p></div> : 
+                <div className="space-y-3 p-2">{myTasks.map((task) => <div key={task.id} className="bg-white border border-slate-200 rounded-xl p-4 hover:border-blue-400 shadow-sm"><h3 className="font-bold text-slate-800 text-sm">{task['SUBJECT WO']}</h3><p className="text-xs text-slate-500 italic mt-1">{task.KETERANGAN}</p></div>)}</div>
+              }
             </div>
-
-            {/* Modal Footer */}
             <div className="p-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl flex justify-between items-center">
               <span className="text-xs text-slate-400 font-bold">{myTasks.length} Pending Task(s)</span>
-              {myTasks.length > 0 && (
-                <button 
-                  onClick={handleDownloadInbox}
-                  className="flex items-center gap-2 bg-white border border-slate-300 hover:border-blue-500 hover:text-blue-600 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm"
-                >
-                  <Download size={16} /> Download .txt
-                </button>
-              )}
+              {myTasks.length > 0 && <button onClick={handleDownloadInbox} className="flex items-center gap-2 bg-white border border-slate-300 hover:border-blue-500 hover:text-blue-600 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm"><Download size={16} /> Download .txt</button>}
             </div>
-
           </div>
         </div>
       )}
 
+      {/* STYLE TOOLTIP HITAM */}
+      <style dangerouslySetInnerHTML={{__html: `.apexcharts-tooltip-text, .apexcharts-tooltip-title, .apexcharts-tooltip-text-y-label, .apexcharts-tooltip-text-y-value { color: #0f172a !important; font-family: inherit !important; font-weight: 700 !important; } .apexcharts-tooltip { background: #ffffff !important; border: 1px solid #e2e8f0 !important; box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1) !important; }`}} />
     </div>
   );
 }
@@ -301,12 +329,29 @@ export default function Dashboard() {
 function StatCard({ title, value, sub, icon, color }: any) {
   const colors: any = { blue: 'bg-blue-50 text-blue-600', purple: 'bg-purple-50 text-purple-600', emerald: 'bg-emerald-50 text-emerald-600', orange: 'bg-orange-50 text-orange-600' };
   return (
-    <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden group hover:shadow-md transition-all">
-      <div className="flex justify-between items-start z-10 relative">
-        <div><p className="text-slate-500 text-[10px] font-bold uppercase tracking-wider">{title}</p><h3 className="text-3xl font-bold text-slate-800 mt-1 font-mono">{value}</h3><p className="mt-2 text-[11px] font-semibold text-slate-400">{sub}</p></div>
-        <div className={`p-3 rounded-lg ${colors[color]} group-hover:scale-110 transition-transform`}>{icon}</div>
+    <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all group">
+      <div className="flex justify-between items-start mb-4">
+        <div className={`p-3 rounded-xl group-hover:scale-110 transition-transform ${colors[color]}`}>{icon}</div>
       </div>
-      <div className={`absolute bottom-0 left-0 h-1 w-full opacity-10 ${colors[color].split(' ')[0]}`}></div>
+      <h3 className="text-3xl font-black text-slate-900 mb-1">{value}</h3>
+      <p className="text-sm font-bold text-slate-500">{title}</p>
+      <p className="text-xs text-slate-400 mt-1 font-medium">{sub}</p>
+    </div>
+  );
+}
+
+// KOMPONEN SKELETON
+function DashboardSkeleton() {
+  return (
+    <div className="p-6 bg-slate-50 min-h-screen font-sans animate-pulse">
+      <div className="h-12 w-full bg-slate-200 rounded-xl mb-8"></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {[1,2,3,4].map(i => <div key={i} className="h-32 bg-slate-200 rounded-2xl"></div>)}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 h-96 bg-slate-200 rounded-2xl"></div>
+        <div className="flex flex-col gap-6"><div className="h-48 bg-slate-200 rounded-2xl"></div><div className="h-64 bg-slate-200 rounded-2xl"></div></div>
+      </div>
     </div>
   );
 }
