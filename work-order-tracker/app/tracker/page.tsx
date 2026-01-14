@@ -10,24 +10,23 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
-import { toast } from 'sonner'; // Tambahkan Toast biar error lebih rapi
+import { toast } from 'sonner'; 
 
 // Setup ApexCharts (No SSR)
 const ReactApexChart = dynamic(() => import('react-apexcharts'), { ssr: false });
 
 // --- FIX 1: UPDATE KEY MAPPING AGAR SESUAI DEFAULT STATE ---
-// Kunci di sini harus SAMA PERSIS dengan nilai awal useState
 const TABLE_MAP = {
-  'Pelanggan Baru': 'Berlangganan 2026',         // SEBELUMNYA: 'Berlangganan' -> ERROR
-  'Berhenti Langganan': 'Berhenti Berlangganan 2026',
+  'Berlangganan': 'Berlangganan 2026',
+  'Berhenti Berlangganan': 'Berhenti Berlangganan 2026',
   'Berhenti Sementara': 'Berhenti Sementara 2026',
   'Upgrade': 'Upgrade 2026',
   'Downgrade': 'Downgrade 2026'
 };
 
 export default function TrackerPage() {
-  // State default adalah 'Pelanggan Baru', jadi TABLE_MAP harus punya key 'Pelanggan Baru'
-  const [selectedCategory, setSelectedCategory] = useState('Pelanggan Baru');
+  // State default adalah 'Berlangganan', jadi TABLE_MAP harus punya key 'Berlangganan'
+  const [selectedCategory, setSelectedCategory] = useState('Berlangganan');
   const [dataList, setDataList] = useState<any[]>([]); 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -277,50 +276,58 @@ export default function TrackerPage() {
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50/50 text-slate-500 font-bold uppercase text-[10px] tracking-widest border-b border-slate-100">
-              <tr>
-                <th className="px-6 py-4">Tanggal</th>
-                <th className="px-6 py-4">Subject Pelanggan</th>
-                <th className="px-6 py-4">Keterangan / Problem</th>
-                <th className="px-6 py-4">Team Eksekusi</th>
-                <th className="px-6 py-4">BTS Area</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                 <tr><td colSpan={5} className="p-10 text-center text-slate-400">Memuat data...</td></tr>
-              ) : filteredData.length > 0 ? (
-                filteredData.map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
-                    <td className="px-6 py-4 text-slate-500 font-medium">
-                      {row.TANGGAL ? format(new Date(row.TANGGAL), 'dd/MM/yyyy') : '-'}
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="font-bold text-slate-800">{getSubject(row)}</div>
-                      <div className="text-[10px] text-slate-400 uppercase mt-0.5">{row.ISP || 'No ISP'}</div>
-                    </td>
-                    <td className="px-6 py-4 text-slate-600 max-w-xs">
-                      <p className="line-clamp-2 italic">{row['PROBLEM'] || row['REASON'] || row['KETERANGAN'] || '-'}</p>
-                    </td>
-                    <td className="px-6 py-4">
-                        <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md text-xs font-bold">
-                            {row.TEAM || '-'}
-                        </span>
-                    </td>
-                    <td className="px-6 py-4">
-                        <div className="flex items-center gap-1.5 text-slate-600">
-                            <Server size={14} className="text-slate-400" />
-                            <span className="font-mono text-xs">{row.BTS || '-'}</span>
+          
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50/50 text-slate-500 font-bold uppercase text-[10px] tracking-widest border-b border-slate-100">
+                <tr>
+                  <th className="px-6 py-4">Tanggal</th>
+                  <th className="px-6 py-4">Subject Pelanggan</th>
+                  <th className="px-6 py-4 text-emerald-600">Provider (ISP)</th> 
+                  <th className="px-6 py-4">Team Eksekusi</th>
+                  <th className="px-6 py-4">BTS Area</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr><td colSpan={5} className="p-10 text-center text-slate-400">Memuat data...</td></tr>
+                ) : filteredData.length > 0 ? (
+                  filteredData.map((row, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
+                      <td className="px-6 py-4 text-slate-500 font-medium">
+                        {row.TANGGAL ? format(new Date(row.TANGGAL), 'dd/MM/yyyy') : '-'}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="font-bold text-slate-800">{getSubject(row)}</div>
+                        <div className="text-[10px] text-slate-400 italic truncate max-w-[200px]">
+                          {row['PROBLEM'] || row['REASON'] || row['KETERANGAN'] || ''}
                         </div>
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr><td colSpan={5} className="p-10 text-center text-slate-400 italic">Data tidak ditemukan untuk pencarian ini.</td></tr>
-              )}
-            </tbody>
-          </table>
+                      </td>
+                      
+                      {/* UPDATE ISI KOLOM ISP DI SINI */}
+                      <td className="px-6 py-4">
+                        <span className="px-2 py-1 bg-emerald-50 text-emerald-700 rounded-md text-[11px] font-black border border-emerald-100 uppercase">
+                          {row.ISP || 'INTERNAL'}
+                        </span>
+                      </td>
+
+                      <td className="px-6 py-4">
+                          <span className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-md text-xs font-bold uppercase">
+                              {row.TEAM || '-'}
+                          </span>
+                      </td>
+                      <td className="px-6 py-4">
+                          <div className="flex items-center gap-1.5 text-slate-600">
+                              <Server size={14} className="text-slate-400" />
+                              <span className="font-mono text-xs">{row.BTS || '-'}</span>
+                          </div>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr><td colSpan={5} className="p-10 text-center text-slate-400 italic">Data tidak ditemukan.</td></tr>
+                )}
+              </tbody>
+            </table>
         </div>
       </div>
 

@@ -73,7 +73,7 @@ export default function LogActivityPage() {
       <div className="flex flex-col md:flex-row justify-between items-center gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-            <History className="text-blue-600" /> Audit Trail (Log Aktivitas)
+            <History className="text-blue-600" /> Audit Trail
           </h1>
           <p className="text-sm text-slate-500">Rekaman jejak aktivitas user di sistem NOC</p>
         </div>

@@ -11,10 +11,11 @@ import { hasAccess, PERMISSIONS, Role } from '@/lib/permissions';
 import { toast } from 'sonner';
 
 const VLAN_TABLES = [
-  { name: 'VLAN 1-1000 (Metro)', table: 'Daftar Vlan 1-1000' },
-  { name: 'VLAN 1000+ (Corporate)', table: 'Daftar Vlan 1000+' },
-  { name: 'VLAN 2000+ (Residential)', table: 'Daftar Vlan 2000+' },
-  { name: 'VLAN 3000+ (Special)', table: 'Daftar Vlan 3000+' },
+  { name: 'VLAN 1-1000', table: 'Daftar Vlan 1-1000' },
+  { name: 'VLAN 1000+', table: 'Daftar Vlan 1000+' },
+  { name: 'VLAN 2000+', table: 'Daftar Vlan 2000+' },
+  { name: 'VLAN 3000+', table: 'Daftar Vlan 3000+' },
+  { name: 'VLAN 3500+', table: 'Daftar Vlan 3500+' },
 ];
 
 export default function VlanPage() {

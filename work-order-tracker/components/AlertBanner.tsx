@@ -144,8 +144,19 @@ export default function AlertBanner() {
           </div>
           <div className="flex items-center gap-4">
             <div className="flex gap-1">
-              <button onClick={() => setCurrentIndex(p => (p - 1 + alerts.length) % alerts.length)} className="p-2 border rounded-lg hover:bg-slate-50"><ChevronLeft size={16}/></button>
-              <button onClick={() => setCurrentIndex(p => (p + 1) % alerts.length)} className="p-2 border rounded-lg hover:bg-slate-50"><ChevronRight size={16}/></button>
+              <button 
+                    onClick={() => setCurrentIndex(p => (p - 1 + alerts.length) % alerts.length)} 
+                    className="p-2 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-900 transition-colors"
+                  >
+                    <ChevronLeft size={16}/>
+                  </button>
+
+                  <button 
+                    onClick={() => setCurrentIndex(p => (p + 1) % alerts.length)} 
+                    className="p-2 border border-slate-300 rounded-lg hover:bg-slate-50 text-slate-900 transition-colors"
+                  >
+                    <ChevronRight size={16}/>
+                  </button>
             </div>
             <button onClick={() => setIsModalOpen(true)} className="px-4 py-2 bg-rose-600 text-white rounded-lg font-bold text-xs shadow-md">Lihat Semua ({alerts.length})</button>
           </div>
