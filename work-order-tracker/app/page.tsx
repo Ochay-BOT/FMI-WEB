@@ -8,7 +8,7 @@ import {
   Users, Server, ArrowUpRight, Clock, 
   Sun, Moon, CalendarDays, Inbox, CheckCircle2, ArrowRight,
   Download, X, ListTodo, BarChart3, TrendingUp, ArrowDownRight, MinusCircle, 
-  AlertTriangle, Calendar, ChevronLeft, ChevronRight, ExternalLink, List
+  AlertTriangle, Calendar, ChevronLeft, ChevronRight, ExternalLink // SUDAH DITAMBAHKAN
 } from 'lucide-react';
 import { format, getISOWeek } from 'date-fns'; 
 import { id as indonesia } from 'date-fns/locale';
@@ -33,13 +33,12 @@ export default function Dashboard() {
   const [stats, setStats] = useState({
     totalClient: 0, activeClient: 0,
     totalVlanUsed: 0, totalVlanFree: 0,
-    growthMonth: 0, logsToday: 0,
-    woPending: 0
+    growthMonth: 0, logsToday: 0
   });
 
   const [recentLogs, setRecentLogs] = useState<any[]>([]);
   
-  // STATE CHART
+  // STATE BARU CHART
   const [chartTab, setChartTab] = useState<'CLIENT' | 'CAPACITY'>('CLIENT');
   const [chartData, setChartData] = useState<any>({ client: [], capacity: [] });
   const [chartSummary, setChartSummary] = useState({ pasang: 0, putus: 0, cuti: 0, upgrade: 0, downgrade: 0 });
@@ -85,7 +84,6 @@ export default function Dashboard() {
 
       // Stats
       const { count: clientCount } = await supabase.from('Data Client Corporate').select('*', { count: 'exact', head: true });
-      const { count: woCount } = await supabase.from('Report Bulanan').select('*', { count: 'exact', head: true }).in('STATUS', ['PENDING', 'OPEN', 'PROGRESS', 'ON PROGRESS']);
       
       const vlanTables = ['Daftar Vlan 1-1000', 'Daftar Vlan 1000+', 'Daftar Vlan 2000+', 'Daftar Vlan 3000+'];
       const vlanResults = await Promise.all(vlanTables.map(table => supabase.from(table).select('NAME')));
@@ -130,8 +128,7 @@ export default function Dashboard() {
         totalClient: clientCount || 0, activeClient: 0,
         totalVlanUsed: vlanUsed, totalVlanFree: vlanTotal - vlanUsed,
         growthMonth: d1[new Date().getMonth()],
-        logsToday: countToday || 0,
-        woPending: woCount || 0
+        logsToday: countToday || 0
       });
       setRecentLogs(logs || []);
 
@@ -171,23 +168,24 @@ export default function Dashboard() {
     tooltip: { theme: 'light' }
   };
 
-  // --- SKELETON LOADING ---
-  if (loading) return <DashboardSkeleton />;
+  // --- 1. SKELETON LOADING VIEW (TAMPIL SAAT LOADING) ---
+  if (loading) {
+    return <DashboardSkeleton />;
+  }
 
-  // --- MAIN VIEW ---
+  // --- 2. MAIN DASHBOARD VIEW ---
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans relative">
       <AlertBanner />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8 mt-6">
         <StatCard title="Total Client" value={stats.totalClient} sub={`Active: ${stats.activeClient}`} icon={<Users size={24} />} color="blue" />
-        <StatCard title="WO Pending" value={stats.woPending} sub="Needs Action" icon={<Activity size={24} />} color="purple" />
-        <StatCard title="VLAN Usage" value={stats.totalVlanUsed} sub={`Free: ${stats.totalVlanFree}`} icon={<Server size={24} />} color="emerald" />
+        <StatCard title="VLAN Usage" value={stats.totalVlanUsed} sub={`Free: ${stats.totalVlanFree}`} icon={<Server size={24} />} color="purple" />
+        <StatCard title="New This Month" value={`+${stats.growthMonth}`} sub="Growth Trend" icon={<ArrowUpRight size={24} />} color="emerald" />
         <StatCard title="Logs Today" value={stats.logsToday} sub="System Events" icon={<Clock size={24} />} color="orange" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        
         {/* CHART SECTION */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col">
           <div className="p-6 pb-0">
@@ -230,9 +228,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-6">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
             <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-              <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                <Calendar size={18} className="text-blue-600"/> Jadwal Minggu Ini
-              </h3>
+              <h3 className="font-bold text-slate-800 flex items-center gap-2"><Calendar size={18} className="text-blue-600"/> Jadwal Minggu Ini</h3>
               <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded font-mono">Week {getISOWeek(new Date())}</span>
             </div>
             <div className="space-y-4">
@@ -262,42 +258,17 @@ export default function Dashboard() {
 
       {/* --- BANNER WO & MODAL LIHAT SEMUA --- */}
       {currentBannerWO && (
-        <div className="mb-8 relative overflow-hidden rounded-2xl bg-white border border-slate-200 shadow-sm transition-all group mt-8">
-          <div className="absolute top-0 bottom-0 left-0 w-2 bg-rose-600"></div> 
-          <div className="p-6 pl-8 flex flex-col lg:flex-row items-center justify-between gap-6">
-            <div className="flex-1 w-full">
-              <div className="flex items-center gap-3 mb-2">
-                <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider flex items-center gap-1 border border-rose-200">
-                  <AlertTriangle size={12} /> PERHATIAN (WO ACTIVE)
-                </span>
-                <span className="text-xs font-mono font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                    {currentIndex + 1} / {pendingWOs.length}
-                </span>
+        <div className="fixed bottom-6 left-6 z-30 max-w-md w-full bg-white border-l-4 border-rose-600 rounded-r-xl shadow-2xl animate-in slide-in-from-bottom-10 duration-500 hidden md:block">
+           <div className="p-4 relative">
+              <button onClick={() => setShowAllWOModal(true)} className="absolute top-2 right-2 text-slate-400 hover:text-slate-600"><ExternalLink size={16}/></button>
+              <div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-black bg-rose-100 text-rose-700 px-2 py-0.5 rounded uppercase">Urgent WO</span><span className="text-[10px] font-mono text-slate-400">{currentIndex + 1}/{pendingWOs.length}</span></div>
+              <h4 className="font-bold text-sm text-slate-900 line-clamp-1">{currentBannerWO['SUBJECT WO']}</h4>
+              <p className="text-xs text-slate-500 mt-1 line-clamp-1 italic">{currentBannerWO['KETERANGAN']}</p>
+              <div className="flex justify-between items-center mt-3">
+                 <div className="flex gap-1"><button onClick={handlePrev} className="p-1 hover:bg-slate-100 rounded"><ChevronLeft size={16}/></button><button onClick={handleNext} className="p-1 hover:bg-slate-100 rounded"><ChevronRight size={16}/></button></div>
+                 <Link href={`/work-orders/${currentBannerWO.id}`} className="text-xs font-bold text-rose-600 hover:underline">Tangani Sekarang</Link>
               </div>
-              <h3 className="text-xl font-black text-black leading-tight mb-2 line-clamp-2">{currentBannerWO['SUBJECT WO']}</h3>
-              <div className="flex items-center gap-2">
-                 <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-bold uppercase border border-amber-200">
-                    {currentBannerWO.STATUS}
-                 </span>
-                 <p className="text-slate-600 font-bold text-sm italic line-clamp-1">"{currentBannerWO['KETERANGAN'] || '-'}"</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3 w-full lg:w-auto justify-end">
-               <div className="hidden md:block bg-rose-50 text-rose-700 px-3 py-2 rounded-lg border border-rose-100 text-center min-w-[100px]">
-                  <div className="flex items-center justify-center gap-1 text-xs font-bold uppercase mb-0.5">
-                     <Calendar size={12}/> {currentBannerWO.TANGGAL ? format(new Date(currentBannerWO.TANGGAL), 'dd MMM') : '-'}
-                  </div>
-                  <span className="text-[10px] font-bold opacity-70">Jadwal</span>
-               </div>
-               <div className="flex bg-white border border-slate-200 rounded-lg shadow-sm">
-                  <button onClick={handlePrev} className="p-2.5 hover:bg-slate-50 text-slate-600 border-r border-slate-200"><ChevronLeft size={18}/></button>
-                  <button onClick={handleNext} className="p-2.5 hover:bg-slate-50 text-slate-600"><ChevronRight size={18}/></button>
-               </div>
-               <button onClick={() => setShowAllWOModal(true)} className="px-5 py-3 bg-rose-600 text-white rounded-lg font-bold text-sm hover:bg-rose-700 transition shadow-lg shadow-rose-200 whitespace-nowrap flex items-center gap-2">
-                 <List size={16}/> Lihat Semua ({pendingWOs.length})
-               </button>
-            </div>
-          </div>
+           </div>
         </div>
       )}
 
@@ -310,16 +281,9 @@ export default function Dashboard() {
               </div>
               <div className="flex-1 overflow-y-auto p-5 space-y-3 bg-slate-50/50">
                  {pendingWOs.map((wo) => (
-                    <div key={wo.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-rose-300 transition flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
-                       <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200 uppercase">{wo.STATUS}</span><span className="text-[10px] font-mono text-slate-400">#{wo.id}</span></div>
-                          <h4 className="font-bold text-slate-800 text-sm mb-1">{wo['SUBJECT WO']}</h4>
-                          <p className="text-xs text-slate-500 italic line-clamp-1">{wo['KETERANGAN']}</p>
-                       </div>
-                       <div className="flex items-center gap-2">
-                          <Link href={`/work-orders/${wo.id}`}><button className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition flex items-center gap-1">Detail <ExternalLink size={12}/></button></Link>
-                          <button className="px-4 py-2 bg-rose-50 border border-rose-100 text-rose-600 rounded-lg text-xs font-bold hover:bg-rose-100 transition">Selesai</button>
-                       </div>
+                    <div key={wo.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm hover:border-rose-300 transition flex justify-between items-center">
+                       <div><div className="flex items-center gap-2 mb-1"><span className="text-[10px] font-bold bg-amber-100 text-amber-700 px-2 py-0.5 rounded border border-amber-200 uppercase">{wo.STATUS}</span><span className="text-[10px] font-mono text-slate-400">#{wo.id}</span></div><h4 className="font-bold text-slate-800 text-sm mb-1">{wo['SUBJECT WO']}</h4></div>
+                       <Link href={`/work-orders/${wo.id}`}><button className="px-4 py-2 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-50 transition">Detail</button></Link>
                     </div>
                  ))}
               </div>
@@ -376,12 +340,18 @@ function StatCard({ title, value, sub, icon, color }: any) {
   );
 }
 
+// KOMPONEN SKELETON
 function DashboardSkeleton() {
   return (
     <div className="p-6 bg-slate-50 min-h-screen font-sans animate-pulse">
       <div className="h-12 w-full bg-slate-200 rounded-xl mb-8"></div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">{[1,2,3,4].map(i => <div key={i} className="h-32 bg-slate-200 rounded-2xl"></div>)}</div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6"><div className="lg:col-span-2 h-96 bg-slate-200 rounded-2xl"></div><div className="flex flex-col gap-6"><div className="h-48 bg-slate-200 rounded-2xl"></div><div className="h-64 bg-slate-200 rounded-2xl"></div></div></div>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        {[1,2,3,4].map(i => <div key={i} className="h-32 bg-slate-200 rounded-2xl"></div>)}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2 h-96 bg-slate-200 rounded-2xl"></div>
+        <div className="flex flex-col gap-6"><div className="h-48 bg-slate-200 rounded-2xl"></div><div className="h-64 bg-slate-200 rounded-2xl"></div></div>
+      </div>
     </div>
   );
 }
