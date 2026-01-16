@@ -1,10 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { Wifi, Upload, Download, X, FileSpreadsheet, AlertCircle, Info, FileText, Table } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { 
+  Wifi, Upload, Download, X, FileSpreadsheet, AlertCircle, 
+  Info, FileText, Table, Search, Loader2, ArrowRight, User, Database 
+} from 'lucide-react';
 import { format } from 'date-fns';
 import { id as indonesia } from 'date-fns/locale';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { createBrowserClient } from '@supabase/ssr';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
@@ -22,14 +25,22 @@ export default function Header() {
   const [showExportModal, setShowExportModal] = useState(false);
   const [selectedTable, setSelectedTable] = useState('');
   const [exportConfig, setExportConfig] = useState({ table: '', format: '' });
+  
+  // State Global Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const searchRef = useRef<HTMLDivElement>(null);
+
   const pathname = usePathname();
+  const router = useRouter();
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   );
 
-  // Definisi Header Kolom Sesuai Database
   const TABLE_GUIDE: Record<string, string[]> = {
     "Report Bulanan": ["TANGGAL", "SUBJECT WO", "STATUS", "JENIS WO", "KETERANGAN", "SELESAI ACTION", "NAMA TEAM"],
     "Berlangganan 2026": ["TANGGAL", "SUBJECT BERLANGGANAN", "PROBLEM", "TEAM", "STATUS", "BTS", "DEVICE", "ISP"],
@@ -44,8 +55,104 @@ export default function Header() {
   useEffect(() => {
     setMounted(true);
     const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
+        setShowResults(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
   }, []);
+
+  // --- LOGIKA GLOBAL SEARCH (FIXED) ---
+  const handleGlobalSearch = async (query: string) => {
+    setSearchQuery(query);
+    if (query.trim().length < 2) {
+      setSearchResults([]);
+      setShowResults(false);
+      return;
+    }
+
+    setIsSearching(true);
+    setShowResults(true);
+
+    try {
+      // 1. Search Client (Kolom: Nama Pelanggan, ID Pelanggan)
+      const clientsQuery = supabase
+        .from('Data Client Corporate')
+        .select('id, "Nama Pelanggan", "ID Pelanggan"')
+        .or(`"Nama Pelanggan".ilike.%${query}%,"ID Pelanggan".ilike.%${query}%`)
+        .limit(3);
+
+      // 2. Search WO (Kolom: SUBJECT WO)
+      const reportsQuery = supabase
+        .from('Report Bulanan')
+        .select('id, "SUBJECT WO", TANGGAL')
+        .ilike('SUBJECT WO', `%${query}%`)
+        .limit(3);
+
+      // 3. Search VLAN (Kolom: VLAN, NAME)
+      const vlanTables = ['Daftar Vlan 1-1000', 'Daftar Vlan 1000+', 'Daftar Vlan 2000+', 'Daftar Vlan 3000+'];
+      
+      const vlanQueries = vlanTables.map(tableName => {
+        // Jika query adalah angka murni, kita bisa gunakan filter eq (equal) untuk VLAN ID
+        const isNumeric = !isNaN(Number(query));
+        
+        let baseQuery = supabase.from(tableName).select('VLAN, NAME');
+        
+        if (isNumeric) {
+           // Mencari Nama yang mengandung angka TERSEBUT atau VLAN yang SAMA PERSIS
+           return baseQuery.or(`NAME.ilike.%${query}%,VLAN.eq.${query}`).limit(2);
+        } else {
+           // Jika input teks, cari di Nama saja
+           return baseQuery.ilike('NAME', `%${query}%`).limit(2);
+        }
+      });
+
+      const [clients, reports, ...vlanResults] = await Promise.all([
+        clientsQuery, 
+        reportsQuery, 
+        ...vlanQueries
+      ]);
+
+      const allVlanData = vlanResults.flatMap(res => res.data || []);
+
+      const combined = [
+        ...(clients.data?.map(i => ({ 
+          type: 'Client', 
+          icon: <User size={14}/>, 
+          label: i['Nama Pelanggan'], 
+          subLabel: i['ID Pelanggan'], 
+          link: '/clients' 
+        })) || []),
+        ...(reports.data?.map(i => ({ 
+          type: 'Work Order', 
+          icon: <FileText size={14}/>, 
+          label: i['SUBJECT WO'], 
+          subLabel: i['TANGGAL'],
+          link: '/work-orders' 
+        })) || []),
+        ...(allVlanData.map(i => ({ 
+          type: 'VLAN', 
+          icon: <Database size={14}/>, 
+          label: i['NAME'], 
+          subLabel: `VLAN ID: ${i['VLAN']}`, 
+          link: '/vlan-database' 
+        })) || [])
+      ];
+
+      setSearchResults(combined);
+    } catch (err) {
+      console.error("Search Error:", err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   // --- LOGIKA EXPORT MULTI-FORMAT ---
   const handleProcessExport = async () => {
@@ -58,9 +165,7 @@ export default function Header() {
       const { data, error } = await supabase.from(table).select('*');
       toast.dismiss(loadingToast);
 
-      if (error || !data || data.length === 0) {
-        return toast.error("Gagal mengambil data atau data kosong");
-      }
+      if (error || !data || data.length === 0) return toast.error("Gagal mengambil data atau data kosong");
 
       const fileName = `${table}_${format(new Date(), 'yyyyMMdd_HHmm')}`;
 
@@ -93,7 +198,7 @@ export default function Header() {
           body: rows,
           startY: 25,
           styles: { fontSize: 7, cellPadding: 2 },
-          headStyles: { fillColor: [37, 99, 235] } // Blue-600
+          headStyles: { fillColor: [37, 99, 235] }
         });
         doc.save(`${fileName}.pdf`);
       }
@@ -139,20 +244,77 @@ export default function Header() {
   return (
     <header className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col md:flex-row justify-between items-center shadow-sm sticky top-0 z-40 h-[73px]">
       
-      {/* BAGIAN KIRI */}
-      <div className="flex items-center gap-3">
-        <div className="bg-blue-600 p-2 rounded-lg">
-          <Wifi className="text-white" size={20} />
+      {/* BAGIAN KIRI: BRANDING & SEARCH BAR */}
+      <div className="flex items-center gap-8 flex-1">
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="bg-blue-600 p-2 rounded-lg">
+            <Wifi className="text-white" size={20} />
+          </div>
+          <div className="hidden lg:block">
+            <h1 className="text-sm font-bold text-slate-800 leading-none">NOC Command Center</h1>
+            <p className="text-[9px] text-slate-500 font-medium mt-1 uppercase tracking-tighter">Monitoring & Database</p>
+          </div>
         </div>
-        <div>
-          <h1 className="text-lg font-bold text-slate-800 tracking-tight leading-none">Network Operating Center</h1>
-          <p className="text-[10px] text-slate-500 font-medium mt-1">Real-time Network Monitoring & Activities</p>
+
+        {/* INPUT GLOBAL SEARCH */}
+        <div className="relative max-w-md w-full" ref={searchRef}>
+          <div className="relative group">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
+            <input 
+              type="text"
+              placeholder="Cari Client, WO, atau VLAN..."
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-10 pr-10 text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all font-medium"
+              value={searchQuery}
+              onChange={(e) => handleGlobalSearch(e.target.value)}
+              onFocus={() => searchQuery.length >= 2 && setShowResults(true)}
+            />
+            {isSearching ? (
+              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" size={14} />
+            ) : searchQuery && (
+              <button onClick={() => {setSearchQuery(''); setSearchResults([]);}} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          {/* HASIL PENCARIAN DROPDOWN */}
+          {showResults && (
+            <div className="absolute top-full mt-2 w-full bg-white border border-slate-200 shadow-2xl rounded-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+              <div className="p-2 max-h-[350px] overflow-y-auto custom-scrollbar">
+                {searchResults.length > 0 ? (
+                  searchResults.map((result, idx) => (
+                    <button 
+                      key={idx}
+                      onClick={() => { router.push(result.link); setShowResults(false); }}
+                      className="w-full flex items-center justify-between p-3 hover:bg-slate-50 rounded-xl transition-colors group text-left"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-slate-100 rounded-lg text-slate-500 group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
+                          {result.icon}
+                        </div>
+                        <div>
+                            <p className="text-[11px] font-bold text-slate-800 line-clamp-1">{result.label}</p>
+                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                              {result.type} {result.subLabel ? `• ${result.subLabel}` : ''}
+                            </p>
+                          </div>
+                      </div>
+                      <ArrowRight size={14} className="text-slate-300 opacity-0 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
+                    </button>
+                  ))
+                ) : (
+                  <div className="p-6 text-center">
+                    <p className="text-xs text-slate-400 font-medium tracking-wide italic">Data tidak ditemukan.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* BAGIAN KANAN */}
+      {/* BAGIAN KANAN: ACTIONS, NOTIF, & TIME */}
       <div className="flex items-center gap-4 md:gap-6 mt-3 md:mt-0">
-        
         <div className="flex items-center gap-2 border-r border-slate-200 pr-6 mr-2 h-10">
           <button 
             onClick={() => setShowImportModal(true)}
@@ -189,7 +351,7 @@ export default function Header() {
         </div>
       </div>
 
-      {/* MODAL EXPORT [BARU] */}
+      {/* MODAL EXPORT */}
       {showExportModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in duration-200">
@@ -230,7 +392,7 @@ export default function Header() {
                 onClick={handleProcessExport}
                 className="w-full py-4 bg-blue-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 transition shadow-xl shadow-blue-100 flex items-center justify-center gap-2 mt-4"
               >
-                <Download size={18} /> Export
+                <Download size={18} /> Eksekusi Export
               </button>
             </div>
           </div>

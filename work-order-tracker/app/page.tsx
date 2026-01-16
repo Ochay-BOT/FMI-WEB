@@ -8,7 +8,8 @@ import {
   Users, Server, ArrowUpRight, Clock, Activity, Plus, List,
   Sun, Moon, CalendarDays, Inbox, CheckCircle2, ArrowRight,
   Download, X, ListTodo, BarChart3, TrendingUp, ArrowDownRight, MinusCircle, 
-  AlertTriangle, Calendar, ChevronLeft, ChevronRight, ExternalLink 
+  AlertTriangle, Calendar, ChevronLeft, ChevronRight, ExternalLink,
+  ChevronDown, Search // Ditambahkan untuk fitur pencarian dan akordion
 } from 'lucide-react';
 import { format, getISOWeek } from 'date-fns'; 
 import { id as indonesia } from 'date-fns/locale';
@@ -43,8 +44,12 @@ export default function Dashboard() {
   const [chartTab, setChartTab] = useState<'CLIENT' | 'CAPACITY'>('CLIENT');
   const [chartData, setChartData] = useState<any>({ client: [], capacity: [] });
   const [chartSummary, setChartSummary] = useState({ pasang: 0, putus: 0, cuti: 0, upgrade: 0, downgrade: 0 });
-  const [myTasks, setMyTasks] = useState<any[]>([]);
+  
+  // --- STATE UNTUK SISTEM INBOX GRUP ---
+  const [myInboxTickets, setMyInboxTickets] = useState<any[]>([]);
   const [showInbox, setShowInbox] = useState(false); 
+  const [expandedTicket, setExpandedTicket] = useState<string | null>(null);
+  const [searchTicket, setSearchTicket] = useState('');
 
   const supabase = createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL || '',
@@ -54,7 +59,6 @@ export default function Dashboard() {
   const morningSquad = TEAM_CONFIG.isWeekA_Morning ? TEAM_CONFIG.teamA : TEAM_CONFIG.teamB;
   const afternoonSquad = TEAM_CONFIG.isWeekA_Morning ? TEAM_CONFIG.teamB : TEAM_CONFIG.teamA;
 
-  // --- FUNGSI SALAM HANGAT ---
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 11) return 'Selamat Pagi';
@@ -68,6 +72,7 @@ export default function Dashboard() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       let currentUserName = '';
+      let currentUserRole = '';
 
       if (user) {
         const { data: profile } = await supabase.from('profiles').select('role, full_name').eq('id', user.id).single();
@@ -75,14 +80,42 @@ export default function Dashboard() {
             setUserRole(profile.role as Role);
             setUserFullName(profile.full_name);
             currentUserName = profile.full_name;
+            currentUserRole = profile.role;
         }
       }
 
       if (currentUserName) {
-        const { data: tasks } = await supabase.from('Report Bulanan').select('*').eq('NAMA TEAM', currentUserName).not('STATUS', 'in', '("SOLVED","CLOSED")').order('TANGGAL', { ascending: false });
-        if (tasks) setMyTasks(tasks);
+        // QUERY MULTI-ROLE: SUPER_DEV melihat semua, PIC melihat milik sendiri
+        let query = supabase.from('inbox_tugas').select('*');
+
+        if (currentUserRole !== 'SUPER_DEV') {
+          query = query.eq('assigned_to', currentUserName).eq('status', 'OPEN');
+        }
+
+        const { data: inboxData } = await query.order('created_at', { ascending: false });
+
+        if (inboxData) {
+          const enrichedTickets = await Promise.all(inboxData.map(async (ticket) => {
+            const { data: woDetails } = await supabase
+              .from('Report Bulanan')
+              .select('id, "SUBJECT WO", STATUS, KETERANGAN')
+              .in('id', ticket.wo_ids);
+
+            // AUTO-VALIDATION: Cek status asli di database
+            const allSolved = woDetails?.every(wo => wo.STATUS === 'SOLVED' || wo.STATUS === 'CLOSED');
+            
+            if (allSolved && woDetails.length > 0 && ticket.status !== 'SOLVED') {
+              await supabase.from('inbox_tugas').update({ status: 'SOLVED' }).eq('id', ticket.id);
+            }
+
+            return { ...ticket, details: woDetails || [] };
+          }));
+          
+          setMyInboxTickets(enrichedTickets);
+        }
       }
 
+      // --- FETCH DATA STATS & CHART ---
       const { count: clientCount } = await supabase.from('Data Client Corporate').select('*', { count: 'exact', head: true });
       const { count: pendingCount } = await supabase.from('Report Bulanan').select('id', { count: 'exact', head: true }).in('STATUS', ['PENDING', 'OPEN', 'PROGRESS', 'ON PROGRESS']);
       
@@ -113,38 +146,46 @@ export default function Dashboard() {
 
       setStats({
         totalClient: clientCount || 0,
-        totalVlanUsed: 0,
-        totalVlanFree: 0,
+        totalVlanUsed: 0, totalVlanFree: 0,
         growthMonth: d[0][new Date().getMonth()],
         logsToday: countToday || 0,
         woPending: pendingCount || 0
       });
       setRecentLogs(logs || []);
 
-    } catch (err) { console.error("Critical Dashboard Error:", err); } 
+    } catch (err) { console.error("Dashboard Error:", err); } 
     finally { setLoading(false); }
   }
 
   useEffect(() => { fetchDashboardData(); }, []);
 
   const handleDownloadInbox = () => {
-    if (myTasks.length === 0) return alert("Tidak ada tugas.");
-    let content = `TO DO LIST - ${userFullName}\nGenerated: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n==========================\n\n`;
-    myTasks.forEach((task, index) => {
-      content += `${index + 1}. [${task.STATUS}] ${task['SUBJECT WO']}\n   Tgl: ${task.TANGGAL}\n   Ket: ${task.KETERANGAN || '-'}\n--------------------------\n`;
+    if (myInboxTickets.length === 0) return alert("Tidak ada tugas.");
+    let content = `TO DO LIST GRUP - ${userFullName}\n`;
+    content += `Generated: ${format(new Date(), 'dd MMM yyyy HH:mm')}\n`;
+    content += `==========================\n\n`;
+
+    myInboxTickets.forEach((ticket) => {
+      const ticketLabel = ticket.id_tiket_custom || `BATCH #${ticket.id.slice(0,8).toUpperCase()}`;
+      content += `${ticketLabel} (PIC: ${ticket.assigned_to})\n`;
+      ticket.details.forEach((wo: any) => {
+        content += `- [${wo.STATUS}] ${wo['SUBJECT WO']}\n`;
+      });
+      content += `\n--------------------------\n`;
     });
+
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([content], { type: 'text/plain' }));
-    link.download = `Inbox_${userFullName}.txt`;
+    link.download = `Monitoring_Inbox_${userFullName}.txt`;
     link.click();
   };
 
   if (loading) return <DashboardSkeleton />;
 
   return (
-    <div className="p-6 bg-slate-50 min-h-screen font-sans relative text-left">
+    <div className="p-6 bg-slate-50 min-h-screen font-sans relative text-left text-slate-800">
       
-      {/* HEADER UTAMA DENGAN SALAM HANGAT */}
+      {/* HEADER UTAMA */}
       <div className="flex justify-between items-end mb-6">
         <div>
           <p className="text-slate-500 text-sm font-bold mb-1">
@@ -163,7 +204,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* ALERT BANNER */}
       <AlertBanner />
 
       {/* STATS CARDS */}
@@ -176,8 +216,9 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* CHART SECTION */}
-        <div className="bg-white rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col">
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 lg:col-span-2 flex flex-col overflow-hidden">
           <div className="p-6 pb-0">
+            {/* Chart Tab Header */}
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
                 <div>
                     <h3 className="font-bold text-lg text-slate-800 flex items-center gap-2">
@@ -191,6 +232,7 @@ export default function Dashboard() {
                     <button onClick={() => setChartTab('CAPACITY')} className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${chartTab === 'CAPACITY' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Kapasitas</button>
                 </div>
             </div>
+            {/* Main Chart */}
             <div className="flex-1 min-h-[280px]">
                 <ReactApexChart 
                   options={{
@@ -199,39 +241,30 @@ export default function Dashboard() {
                     xaxis: { categories: ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'] },
                   }} 
                   series={chartTab === 'CLIENT' ? chartData.client : chartData.capacity} 
-                  type="bar" 
-                  height={280} 
+                  type="bar" height={280} 
                 />
             </div>
           </div>
-          <div className="mt-auto bg-slate-50 border-t border-slate-100 p-6 rounded-b-xl">
+          {/* Chart Summary Footer */}
+          <div className="mt-auto bg-slate-50 border-t border-slate-100 p-6">
              <div className="grid grid-cols-3 gap-4">
-               {chartTab === 'CLIENT' ? (
-                 <>
-                   <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Pasang</p><div className="flex items-center gap-2"><span className="p-1 bg-emerald-100 text-emerald-600 rounded"><ArrowUpRight size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.pasang}</span></div></div>
-                   <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Putus</p><div className="flex items-center gap-2"><span className="p-1 bg-rose-100 text-rose-600 rounded"><ArrowDownRight size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.putus}</span></div></div>
-                   <div className="bg-white p-3 rounded-xl border border-amber-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Sedang Cuti</p><div className="flex items-center gap-2"><span className="p-1 bg-amber-100 text-amber-600 rounded"><MinusCircle size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.cuti}</span></div></div>
-                 </>
-               ) : (
-                 <>
-                   <div className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Upgrade</p><div className="flex items-center gap-2"><span className="p-1 bg-blue-100 text-blue-600 rounded"><TrendingUp size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.upgrade}</span></div></div>
-                   <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Downgrade</p><div className="flex items-center gap-2"><span className="p-1 bg-slate-100 text-slate-600 rounded"><TrendingUp size={14} className="rotate-180"/></span><span className="text-xl font-black text-slate-800">{chartSummary.downgrade}</span></div></div>
-                 </>
-               )}
+                <div className="bg-white p-3 rounded-xl border border-emerald-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Pasang</p><div className="flex items-center gap-2"><span className="p-1 bg-emerald-100 text-emerald-600 rounded"><ArrowUpRight size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.pasang}</span></div></div>
+                <div className="bg-white p-3 rounded-xl border border-rose-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Total Putus</p><div className="flex items-center gap-2"><span className="p-1 bg-rose-100 text-rose-600 rounded"><ArrowDownRight size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.putus}</span></div></div>
+                <div className="bg-white p-3 rounded-xl border border-amber-100 shadow-sm"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Sedang Cuti</p><div className="flex items-center gap-2"><span className="p-1 bg-amber-100 text-amber-600 rounded"><MinusCircle size={14}/></span><span className="text-xl font-black text-slate-800">{chartSummary.cuti}</span></div></div>
              </div>
           </div>
         </div>
 
-        {/* JADWAL & AKTIVITAS */}
+        {/* JADWAL & AKTIVITAS SIDEBAR */}
         <div className="flex flex-col gap-6">
           <div className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-left"><Calendar size={18} className="text-blue-600"/> Jadwal NOC</h3>
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2"><Calendar size={18} className="text-blue-600"/> Jadwal NOC</h3>
             <div className="space-y-4">
-              <div className="bg-amber-50 p-3 rounded-lg border border-amber-100 text-left">
+              <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
                 <p className="text-[10px] font-bold text-amber-700 uppercase mb-2">Pagi (08.00 - 16.00)</p>
                 <div className="flex gap-2">{morningSquad.map((name, i) => <span key={i} className="px-3 py-1 bg-white text-slate-700 text-xs font-bold rounded shadow-sm border border-amber-200 flex-1 text-center">{name}</span>)}</div>
               </div>
-              <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100 text-left">
+              <div className="bg-indigo-50 p-3 rounded-lg border border-indigo-100">
                 <p className="text-[10px] font-bold text-indigo-700 uppercase mb-2">Siang (14.00 - 22.00)</p>
                 <div className="flex gap-2">{afternoonSquad.map((name, i) => <span key={i} className="px-3 py-1 bg-white text-slate-700 text-xs font-bold rounded shadow-sm border border-indigo-200 flex-1 text-center">{name}</span>)}</div>
               </div>
@@ -239,14 +272,14 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white rounded-xl shadow-sm border border-slate-200 flex flex-col flex-1 overflow-hidden">
-            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center">
-              <h3 className="font-bold text-slate-800 text-sm">Aktivitas Terkini</h3>
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50 flex justify-between items-center text-slate-800">
+              <h3 className="font-bold text-sm">Aktivitas Terkini</h3>
               <Link href="/activity-log"><List size={16} className="text-slate-400 hover:text-blue-600 cursor-pointer"/></Link>
             </div>
             <div className="flex-1 overflow-y-auto max-h-[300px] divide-y divide-slate-50">
               {recentLogs.length === 0 ? <p className="p-4 text-center text-xs text-slate-400 italic">Belum ada aktivitas hari ini</p> : 
                 recentLogs.map((log) => (
-                  <div key={log.id} className="p-3 hover:bg-slate-50 flex gap-3 text-left">
+                  <div key={log.id} className="p-3 hover:bg-slate-50 flex gap-3">
                     <div className="w-8 h-8 rounded-full bg-blue-50 flex items-center justify-center text-[10px] font-bold text-blue-600 shrink-0 border border-blue-100 uppercase">
                         {log.actor?.substring(0,2) || 'SY'}
                     </div>
@@ -266,37 +299,154 @@ export default function Dashboard() {
       {/* FLOATING INBOX BUTTON */}
       <button onClick={() => setShowInbox(true)} className="fixed bottom-6 right-6 z-40 bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-2xl transition-transform active:scale-90 flex items-center justify-center group">
         <ListTodo size={28} />
-        {myTasks.length > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 flex items-center justify-center rounded-full border-2 border-slate-50 animate-bounce">{myTasks.length}</span>}
+        {myInboxTickets.length > 0 && (
+          <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold w-6 h-6 flex items-center justify-center rounded-full border-2 border-slate-50 animate-bounce">
+            {myInboxTickets.length}
+          </span>
+        )}
       </button>
 
-      {/* MODAL INBOX */}
+      {/* MODAL INBOX GRUP (ADVANCED MONITORING) */}
       {showInbox && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[85vh]">
-            <div className="p-6 border-b flex justify-between items-center bg-slate-50/50 rounded-t-2xl">
-              <div><h2 className="text-xl font-bold text-slate-800 flex items-center gap-2"><Inbox className="text-blue-600" /> Inbox Tugas</h2></div>
-              <button onClick={() => setShowInbox(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500"><X size={24} /></button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 text-left font-sans">
+          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            
+            {/* Header Modal with Search */}
+            <div className="p-6 border-b flex flex-col gap-4 bg-slate-50/50">
+              <div className="flex justify-between items-center text-slate-800">
+                <div>
+                  <h2 className="text-xl font-bold flex items-center gap-2">
+                    <Inbox className="text-blue-600" /> Inbox Tugas Utama
+                  </h2>
+                  <p className="text-[10px] text-slate-400 font-bold uppercase mt-1 tracking-widest">
+                    {userRole === 'SUPER_DEV' ? 'Mode Monitoring: Pantau Seluruh PIC' : 'Daftar Paket Work Order Aktif'}
+                  </p>
+                </div>
+                <button onClick={() => setShowInbox(false)} className="p-2 hover:bg-slate-200 rounded-full transition-colors text-slate-500">
+                  <X size={24} />
+                </button>
+              </div>
+
+              {/* Search Bar */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input 
+                  type="text"
+                  placeholder="Cari nomor tiket (ex: PND/PRG...)"
+                  value={searchTicket}
+                  onChange={(e) => setSearchTicket(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-black outline-none focus:ring-2 focus:ring-blue-500 transition-all shadow-sm"
+                />
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 text-left">
-              {myTasks.length === 0 ? <div className="flex flex-col items-center justify-center h-64 text-slate-400"><CheckCircle2 size={64} className="mb-4 text-emerald-100" /><p className="font-bold text-slate-600">Semua tugas beres!</p></div> : 
-                <div className="space-y-3 p-2">{myTasks.map((task) => <div key={task.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm hover:border-blue-400 transition-colors"><h3 className="font-bold text-slate-800 text-sm">{task['SUBJECT WO']}</h3><p className="text-xs text-slate-500 italic mt-1">{task.KETERANGAN}</p></div>)}</div>
-              }
+            
+            {/* List Tiket Content */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {myInboxTickets.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                  <CheckCircle2 size={64} className="mb-4 text-emerald-100" />
+                  <p className="font-bold">Inbox kosong atau tidak ada data cocok.</p>
+                </div>
+              ) : (
+                myInboxTickets
+                  .filter(t => (t.id_tiket_custom || '').toLowerCase().includes(searchTicket.toLowerCase()))
+                  .map((ticket) => {
+                    const isExpanded = expandedTicket === ticket.id;
+                    const displayID = ticket.id_tiket_custom || `BATCH #${ticket.id.slice(0,8).toUpperCase()}`;
+                    
+                    return (
+                      <div key={ticket.id} className={`border-2 rounded-2xl overflow-hidden transition-all duration-300 ${isExpanded ? 'border-blue-400 shadow-lg' : 'border-slate-100 hover:border-slate-300'}`}>
+                        {/* Ticket Header */}
+                        <button 
+                          onClick={() => setExpandedTicket(isExpanded ? null : ticket.id)}
+                          className={`w-full flex items-center justify-between p-4 text-left ${isExpanded ? 'bg-blue-50/50' : 'bg-white'}`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className={`p-2 rounded-xl ${isExpanded ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                              <ListTodo size={20} />
+                            </div>
+                            <div>
+                              <h3 className="font-black text-slate-800 text-sm tracking-tight uppercase">{displayID}</h3>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                {/* PIC INDICATOR FOR SUPER_DEV */}
+                                {userRole === 'SUPER_DEV' && (
+                                  <span className="text-[9px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-bold uppercase border border-slate-300">
+                                    PIC: {ticket.assigned_to}
+                                  </span>
+                                )}
+                                <p className="text-[10px] text-slate-500 font-bold">{ticket.details.length} Work Orders</p>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-3">
+                            {/* BATCH STATUS BADGE */}
+                            <span className={`px-2 py-0.5 text-[9px] font-black rounded uppercase border ${
+                              ticket.status === 'SOLVED' 
+                                ? 'bg-emerald-100 text-emerald-700 border-emerald-200' 
+                                : 'bg-amber-100 text-amber-700 border-amber-200'
+                            }`}>
+                              {ticket.status}
+                            </span>
+                            {isExpanded ? <ChevronDown size={18} className="text-slate-400" /> : <ChevronRight size={18} className="text-slate-400" />}
+                          </div>
+                        </button>
+
+                        {/* Collapsible Content */}
+                        {isExpanded && (
+                          <div className="p-4 bg-white border-t border-blue-100 animate-in slide-in-from-top-1 duration-200">
+                            <div className="space-y-2">
+                              {ticket.details.map((wo: any) => (
+                                <div key={wo.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 text-slate-800">
+                                  <div className="flex-1 pr-3">
+                                    <h4 className="font-bold text-xs uppercase leading-tight">{wo['SUBJECT WO']}</h4>
+                                    <p className="text-[9px] text-slate-500 italic mt-0.5">{wo.KETERANGAN || '-'}</p>
+                                  </div>
+                                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase border ${
+                                    wo.STATUS === 'SOLVED' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-amber-50 text-amber-600 border-amber-200'
+                                  }`}>
+                                    {wo.STATUS}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+              )}
             </div>
-            <div className="p-4 border-t flex justify-between items-center bg-slate-50 rounded-b-2xl">
-              <span className="text-xs text-slate-400 font-bold">{myTasks.length} Pending Tasks</span>
-              {myTasks.length > 0 && <button onClick={handleDownloadInbox} className="flex items-center gap-2 bg-white border border-slate-300 px-4 py-2 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 transition-all"><Download size={16} /> Download .txt</button>}
+            
+            {/* Footer Modal Action */}
+            <div className="p-4 border-t flex justify-between items-center bg-slate-50 shrink-0">
+              <span className="text-xs text-slate-400 font-bold uppercase">
+                {userRole === 'SUPER_DEV' ? `Total Monitoring: ${myInboxTickets.length} Tiket` : `${myInboxTickets.length} Paket Pending`}
+              </span>
+              {myInboxTickets.length > 0 && (
+                <button onClick={handleDownloadInbox} className="flex items-center gap-2 bg-white border border-slate-300 px-4 py-2 rounded-xl text-xs font-bold shadow-sm hover:bg-slate-50 transition-all text-slate-800">
+                  <Download size={16} /> Download .txt
+                </button>
+              )}
             </div>
           </div>
         </div>
       )}
 
+      {/* ApexCharts Global Tooltip Fix */}
       <style dangerouslySetInnerHTML={{__html: `.apexcharts-tooltip-text { color: #0f172a !important; font-weight: 700 !important; }`}} />
     </div>
   );
 }
 
+// --- SUB-COMPONENTS ---
 function StatCard({ title, value, sub, icon, color }: any) {
-  const colors: any = { blue: 'bg-blue-50 text-blue-600', purple: 'bg-purple-50 text-purple-600', emerald: 'bg-emerald-50 text-emerald-600', orange: 'bg-orange-50 text-orange-600' };
+  const colors: any = { 
+    blue: 'bg-blue-50 text-blue-600', 
+    purple: 'bg-purple-50 text-purple-600', 
+    emerald: 'bg-emerald-50 text-emerald-600', 
+    orange: 'bg-orange-50 text-orange-600' 
+  };
   return (
     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all group text-left">
       <div className={`p-3 rounded-xl group-hover:scale-110 transition-transform w-fit mb-4 ${colors[color]}`}>{icon}</div>
@@ -309,7 +459,7 @@ function StatCard({ title, value, sub, icon, color }: any) {
 
 function DashboardSkeleton() {
   return (
-    <div className="p-6 bg-slate-50 min-h-screen font-sans animate-pulse">
+    <div className="p-6 bg-slate-50 min-h-screen font-sans animate-pulse text-left">
       <div className="h-12 w-full bg-slate-200 rounded-xl mb-8"></div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">{[1,2,3,4].map(i => <div key={i} className="h-32 bg-slate-200 rounded-2xl"></div>)}</div>
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6"><div className="lg:col-span-2 h-96 bg-slate-200 rounded-2xl"></div><div className="h-96 bg-slate-200 rounded-2xl"></div></div>

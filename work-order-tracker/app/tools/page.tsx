@@ -5,9 +5,11 @@ import { createBrowserClient } from '@supabase/ssr';
 import { 
   Wrench, Calculator, Activity, FileText, Shuffle, 
   Copy, Download, RefreshCcw, ArrowLeft, ArrowRight,
-  Search, CheckCircle, Lock, Server, RotateCcw, Calendar
+  Search, CheckCircle, Lock, Server, RotateCcw, Calendar,
+  Loader2, User, Database // <-- User sudah ditambahin di sini biar gak error
 } from 'lucide-react';
 import { format } from 'date-fns';
+import { id as idLocale } from 'date-fns/locale';
 import { toast } from 'sonner';
 
 // Import RBAC Helper
@@ -430,191 +432,219 @@ ${form.power || '-'}
 }
 
 // ==========================================
-// 4. WO DISTRIBUTOR (Fix Visibility with Inline Style)
+// 4. WO DISTRIBUTOR (FIXED HEIGHT & INTERNAL SCROLL)
 // ==========================================
 function WoDistributor({ userRole }: { userRole: Role | null }) {
   const [woList, setWoList] = useState<any[]>([]);
   const [technicians, setTechnicians] = useState<any[]>([]); 
   const [selectedTechs, setSelectedTechs] = useState<string[]>([]);
+  const [selectedWO, setSelectedWO] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [distributing, setDistributing] = useState(false);
-
-  // Filter Tanggal (Default: Hari Ini)
-  const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0,10));
+  const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0, 10));
 
   const canDistribute = hasAccess(userRole, PERMISSIONS.TOOLS_WO_DISTRIBUTOR_ACTION);
 
-  // --- 1. FETCH WO (Updated Column Name) ---
   const fetchWO = async () => {
     setLoading(true);
-    let query = supabase.from('Report Bulanan').select('*');
-
-    if (filterDate) {
-      const dateObj = new Date(filterDate);
-      const months = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-      
-      // Format: "11 Januari 2026"
-      const searchString = `${dateObj.getDate()} ${months[dateObj.getMonth()]} ${dateObj.getFullYear()}`;
-      console.log("Mencari teks:", searchString); 
-
-      // Cari di KETERANGAN
-      query = query.ilike('KETERANGAN', `%${searchString}%`);
-      
-      // NOTE: Saat mencari tanggal spesifik, kita longgarkan filter status agar datanya kelihatan dulu
-    } 
-    else {
-      // Jika TIDAK pilih tanggal (Default), cari yang pending & belum ada tim
-      query = query
-        .in('STATUS', ['PENDING', 'OPEN', 'PROGRESS', 'ON PROGRESS'])
-        .is('NAMA TEAM', null); // <--- PERBAIKAN DISINI (Pakai 'NAMA TEAM')
-    }
-
-    const { data, error } = await query.order('id', { ascending: false }).limit(50);
-      
-    if (error) {
-      alert("Gagal ambil data: " + error.message);
-    } else {
+    setSelectedWO([]);
+    try {
+      let query = supabase.from('Report Bulanan').select('*');
+      if (filterDate) {
+        const dateObj = new Date(filterDate);
+        const searchString = format(dateObj, 'd MMMM yyyy', { locale: idLocale });
+        query = query.or('STATUS.eq.PENDING,STATUS.eq.PROGRESS,STATUS.eq.OPEN').ilike('KETERANGAN', `%${searchString}%`);
+      } else {
+        query = query.in('STATUS', ['PENDING', 'OPEN', 'PROGRESS']).is('NAMA TEAM', null);
+      }
+      const { data, error } = await query.order('id', { ascending: false }).limit(100);
+      if (error) throw error;
       setWoList(data || []);
+      toast.success(`${data?.length || 0} WO ditemukan`);
+    } catch (err: any) {
+      toast.error("Gagal ambil data: " + err.message);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
-  // --- 2. FETCH TEKNISI ---
+  const toggleWO = (id: string) => {
+    setSelectedWO(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
+  };
+
+  const toggleAllWO = () => {
+    if (selectedWO.length === woList.length) setSelectedWO([]);
+    else setSelectedWO(woList.map(wo => wo.id));
+  };
+
   useEffect(() => {
     async function getTechs() {
       if (!canDistribute) return;
-      const { data } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .in('role', ['NOC', 'AKTIVATOR', 'SUPER_DEV']); 
+      const { data } = await supabase.from('profiles').select('id, full_name, role').in('role', ['NOC', 'AKTIVATOR', 'SUPER_DEV']); 
       if (data) setTechnicians(data);
     }
     getTechs();
   }, [canDistribute]);
 
   const toggleTech = (name: string) => {
-    if (selectedTechs.includes(name)) {
-      setSelectedTechs(selectedTechs.filter(t => t !== name));
-    } else {
-      setSelectedTechs([...selectedTechs, name]);
-    }
+    setSelectedTechs(prev => prev.includes(name) ? prev.filter(t => t !== name) : [...prev, name]);
   };
 
-  // --- 3. DISTRIBUTE WO (Updated Column Name) ---
-  const distributeWO = async () => {
-    if (!canDistribute) return alert("Akses Ditolak.");
-    if (selectedTechs.length === 0) return alert("Pilih minimal 1 tim!");
-    if (woList.length === 0) return alert("Tidak ada WO.");
+const distributeWO = async () => {
+    if (selectedTechs.length === 0 || selectedWO.length === 0) {
+      return toast.error("Pilih minimal 1 tim dan 1 WO!");
+    }
 
     setDistributing(true);
 
+    // Fungsi untuk membuat singkatan nama (Hilangkan Vokal)
+    const getAbbreviation = (name: string) => {
+      return name.toUpperCase().replace(/[AEIOU\s]/g, '').slice(0, 4);
+    };
+
     try {
-      const updates = woList.map(async (wo, index) => {
-        const assignedTech = selectedTechs[index % selectedTechs.length];
+      const targetWOs = woList.filter(wo => selectedWO.includes(wo.id));
+      const woIds = targetWOs.map(w => w.id);
+
+      const inboxPromises = selectedTechs.map(async (techName) => {
+        // 1. Ambil jumlah tiket saat ini untuk membuat nomor urut (00001)
+        const { count } = await supabase
+          .from('inbox_tugas')
+          .select('*', { count: 'exact', head: true });
         
-        // UPDATE KOLOM 'NAMA TEAM'
-        const { error } = await supabase
-          .from('Report Bulanan')
-          .update({ 
-            'NAMA TEAM': assignedTech, // <--- PERBAIKAN DISINI
-            'STATUS': 'OPEN' 
-          }) 
-          .eq('id', wo.id);
-          
-        if (error) throw error;
+        const nextNumber = (count || 0) + 1;
+        const formattedNumber = String(nextNumber).padStart(5, '0');
+        const nameAbbr = getAbbreviation(techName);
+        
+        // 2. Format Tiket: PND/PRG-ILHM-00001
+        const customTicketId = `PND/PRG-${nameAbbr}-${formattedNumber}`;
+
+        return supabase.from('inbox_tugas').insert({
+          id_tiket_custom: customTicketId, // Simpan ke kolom baru
+          assigned_to: techName,
+          wo_ids: woIds,
+          status: 'OPEN'
+        });
       });
 
-      await Promise.all(updates);
-      alert(`Sukses distribusikan ${woList.length} WO.`);
-      fetchWO(); 
-      setSelectedTechs([]); 
+      // Update Report Bulanan
+      const woUpdate = supabase
+        .from('Report Bulanan')
+        .update({ 
+          'NAMA TEAM': selectedTechs.join(', '), 
+          'STATUS': 'OPEN' 
+        })
+        .in('id', woIds);
 
+      await Promise.all([...inboxPromises, woUpdate]);
+      toast.success(`Berhasil! Tiket grup telah dibuat.`);
+      
+      fetchWO(); setSelectedWO([]); setSelectedTechs([]);
     } catch (error: any) {
-      alert("Error saving: " + error.message);
+      console.error(error);
+      toast.error("Gagal: " + error.message);
     } finally {
       setDistributing(false);
     }
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 min-h-[600px]">
+    // Grid Utama: Kita kunci tinggi maksimalnya di sini agar tidak memanjang ke bawah
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 p-6 items-start text-slate-800 font-sans">
        
-       {/* LIST WO */}
-       <div className="lg:col-span-2 flex flex-col border rounded-xl overflow-hidden bg-white shadow-sm">
-          <div className="p-4 bg-slate-50 border-b flex flex-col md:flex-row justify-between items-center gap-3">
-             <h3 className="font-bold text-sm text-slate-700">WO Pending ({woList.length})</h3>
-             <div className="flex items-center gap-2">
-                {/* FIX: INPUT TANGGAL HITAM */}
+       {/* PANEL KIRI: LIST WO (Scrollable Internal) */}
+       <div className="lg:col-span-2 flex flex-col border border-slate-200 rounded-3xl overflow-hidden bg-white shadow-sm h-[65vh] min-h-[500px]">
+          <div className="p-4 bg-slate-50 border-b flex justify-between items-center shrink-0">
+             <div className="flex items-center gap-3">
                 <input 
-                  type="date" 
-                  value={filterDate} 
-                  onChange={(e) => setFilterDate(e.target.value)} 
-                  style={{ color: 'black' }}
-                  className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-bold text-black bg-white"
+                  type="checkbox" 
+                  className="w-4 h-4 rounded border-slate-300 text-blue-600 cursor-pointer"
+                  checked={selectedWO.length === woList.length && woList.length > 0}
+                  onChange={toggleAllWO}
                 />
-                <button onClick={fetchWO} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs flex items-center gap-1">
-                   {loading ? 'Loading...' : 'Get Data'}
+                <h3 className="font-bold text-sm text-slate-700">Terpilih: {selectedWO.length} WO</h3>
+             </div>
+             <div className="flex items-center gap-2">
+                <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs font-bold text-black outline-none bg-white"/>
+                <button onClick={fetchWO} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2">
+                   {loading ? <Loader2 size={14} className="animate-spin"/> : <RefreshCcw size={14} />} Get Data
                 </button>
              </div>
           </div>
 
-          <div className="flex-1 p-4 space-y-2 overflow-y-auto max-h-[400px]">
+          {/* AREA SCROLL KIRI */}
+          <div className="flex-1 p-4 space-y-3 overflow-y-auto bg-slate-50/20 custom-scrollbar">
              {woList.length === 0 ? (
-               <div className="flex flex-col items-center justify-center h-48 text-slate-400">
-                  <p className="text-xs italic">Tidak ada data ditemukan.</p>
+               <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 border-2 border-dashed rounded-2xl">
+                  <Search size={32} className="opacity-20"/>
+                  <p className="text-xs italic">Cari data berdasarkan tanggal di atas.</p>
                </div>
              ) : (
                woList.map((wo, idx) => (
-                 <div key={idx} className="p-3 border border-slate-200 rounded-lg flex justify-between items-center bg-white hover:bg-slate-50 transition">
-                    <div>
+                 <label 
+                   key={idx} 
+                   className={`p-4 border rounded-2xl flex items-center gap-4 cursor-pointer transition-all hover:border-blue-300 ${
+                     selectedWO.includes(wo.id) ? 'bg-blue-50 border-blue-400 shadow-sm' : 'bg-white border-slate-200'
+                   }`}
+                 >
+                    <input 
+                      type="checkbox" 
+                      className="w-5 h-5 rounded border-slate-300 text-blue-600 shrink-0"
+                      checked={selectedWO.includes(wo.id)}
+                      onChange={() => toggleWO(wo.id)}
+                    />
+                    <div className="flex-1 min-w-0">
                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-[10px] font-mono text-slate-400">
-                             {/* Coba tampilkan tanggal dari KETERANGAN atau kolom TANGGAL */}
-                             {wo.TANGGAL ? format(new Date(wo.TANGGAL), 'dd/MM/yyyy') : '-'}
+                          <span className="text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 uppercase">
+                             {wo.TANGGAL && !isNaN(new Date(wo.TANGGAL).getTime()) 
+                               ? format(new Date(wo.TANGGAL), 'dd/MM/yyyy') 
+                               : 'No Date'}
                           </span>
-                          <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-amber-100 text-amber-700 border border-amber-200">
+                          <span className={`text-[9px] px-2 py-0.5 rounded font-black uppercase border ${
+                            wo.STATUS === 'PROGRESS' ? 'bg-blue-100 text-blue-700 border-blue-200' : 'bg-amber-100 text-amber-700 border-amber-200'
+                          }`}>
                              {wo.STATUS}
                           </span>
-                          {/* Tampilkan Nama Team jika sudah ada (Pakai kurung siku karena ada spasi) */}
-                          {wo['NAMA TEAM'] && (
-                            <span className="text-[9px] px-2 py-0.5 rounded font-bold uppercase bg-emerald-100 text-emerald-700 border border-emerald-200">
-                              {wo['NAMA TEAM']}
-                            </span>
-                          )}
                        </div>
-                       <p className="text-sm font-bold text-slate-800 line-clamp-1">{wo['SUBJECT WO'] || 'No Subject'}</p>
-                       <p className="text-[10px] text-slate-500 line-clamp-1 mt-0.5 italic">
-                          {wo['KETERANGAN'] || '-'}
-                       </p>
+                       <p className="text-xs font-bold text-slate-800 line-clamp-1 uppercase tracking-tight">{wo['SUBJECT WO'] || 'No Subject'}</p>
+                       <p className="text-[10px] text-slate-500 line-clamp-1 italic mt-0.5">{wo['KETERANGAN'] || '-'}</p>
                     </div>
-                 </div>
+                 </label>
                ))
              )}
           </div>
        </div>
 
-       {/* PILIH TIM */}
-       <div className="space-y-6">
-          <div className="border rounded-xl p-5 bg-white shadow-sm h-full flex flex-col">
-             <h3 className="font-bold text-sm text-slate-800 mb-3">Pilih Tim Piket</h3>
-             <div className="space-y-2 flex-1 overflow-y-auto pr-1 min-h-[200px]">
-                {technicians.length === 0 ? <p className="text-xs text-slate-400">Loading users...</p> : 
-                   technicians.map((tech) => (
-                      <label key={tech.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer ${selectedTechs.includes(tech.full_name) ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-slate-50'}`}>
-                         <input type="checkbox" checked={selectedTechs.includes(tech.full_name)} onChange={() => toggleTech(tech.full_name)} className="rounded text-blue-600"/>
-                         <div>
-                            <p className="text-sm font-bold text-slate-700">{tech.full_name}</p>
-                            <p className="text-[10px] text-slate-400 font-bold uppercase">{tech.role}</p>
-                         </div>
-                      </label>
-                   ))
-                }
-             </div>
-             <div className="mt-4 pt-4 border-t">
-               <button onClick={distributeWO} disabled={!canDistribute || selectedTechs.length === 0 || woList.length === 0 || distributing} className="w-full bg-indigo-600 text-white py-3 rounded-lg font-bold text-sm hover:bg-indigo-700 disabled:opacity-50">
-                 {distributing ? 'Membagikan...' : `Distribute (${selectedTechs.length} Tim)`}
-               </button>
-             </div>
+       {/* PANEL KANAN: PILIH TIM & TOMBOL DISTRIBUSI (Sticky di dalam kontainer) */}
+       <div className="flex flex-col border border-slate-200 rounded-3xl p-5 bg-white shadow-sm h-[65vh] min-h-[500px] overflow-hidden">
+          <h3 className="font-bold text-sm text-slate-800 mb-5 flex items-center gap-2 shrink-0 underline decoration-purple-200 decoration-2">
+             <User size={18} className="text-purple-600"/> Pilih Tim Teknisi
+          </h3>
+          
+          {/* AREA SCROLL KANAN */}
+          <div className="flex-1 space-y-2 overflow-y-auto pr-2 mb-4 custom-scrollbar">
+             {technicians.map((tech) => (
+                <label key={tech.id} className={`flex items-center gap-3 p-4 rounded-2xl border cursor-pointer transition-all ${selectedTechs.includes(tech.full_name) ? 'bg-blue-50 border-blue-300 shadow-inner' : 'border-slate-100 hover:bg-slate-50'}`}>
+                   <input type="checkbox" checked={selectedTechs.includes(tech.full_name)} onChange={() => toggleTech(tech.full_name)} className="rounded text-blue-600 w-4 h-4"/>
+                   <div className="min-w-0">
+                      <p className="text-sm font-bold text-slate-700 leading-none truncate">{tech.full_name}</p>
+                      <p className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 tracking-tighter">{tech.role}</p>
+                   </div>
+                </label>
+             ))}
+          </div>
+          
+          {/* TOMBOL DISTRIBUSI (Selalu di bawah panel kanan) */}
+          <div className="pt-4 border-t shrink-0">
+            <button 
+              onClick={distributeWO} 
+              disabled={!canDistribute || selectedTechs.length === 0 || selectedWO.length === 0 || distributing} 
+              className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-sm hover:bg-slate-800 disabled:opacity-50 transition-all shadow-xl active:scale-95 flex justify-center items-center gap-2 mb-2"
+            >
+               {distributing ? <Loader2 size={18} className="animate-spin"/> : <Shuffle size={18}/>}
+               Distribusi {selectedWO.length} Tiket
+            </button>
+            <p className="text-[9px] text-center text-slate-400 font-bold uppercase tracking-widest leading-tight">Status WO otomatis berubah menjadi OPEN</p>
           </div>
        </div>
     </div>
