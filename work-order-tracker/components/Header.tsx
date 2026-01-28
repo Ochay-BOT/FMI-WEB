@@ -257,25 +257,27 @@ export default function Header() {
         </div>
 
         {/* INPUT GLOBAL SEARCH */}
-        <div className="relative max-w-md w-full" ref={searchRef}>
-          <div className="relative group">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
-            <input 
-              type="text"
-              placeholder="Cari Client, WO, atau VLAN..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-10 pr-10 text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all font-medium"
-              value={searchQuery}
-              onChange={(e) => handleGlobalSearch(e.target.value)}
-              onFocus={() => searchQuery.length >= 2 && setShowResults(true)}
-            />
-            {isSearching ? (
-              <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" size={14} />
-            ) : searchQuery && (
-              <button onClick={() => {setSearchQuery(''); setSearchResults([]);}} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                <X size={14} />
-              </button>
-            )}
-          </div>
+          <div className="relative max-w-md w-full" ref={searchRef}>
+            <div className="relative group">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-blue-500 transition-colors" size={16} />
+              <input 
+                type="text"
+                placeholder="Cari Client, WO, atau VLAN..."
+                // TAMBAHKAN !text-slate-900 DAN style={{ color: '#0f172a' }} DI SINI
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-10 pr-10 text-xs outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition-all font-medium !text-slate-900"
+                style={{ color: '#0f172a' }} 
+                value={searchQuery}
+                onChange={(e) => handleGlobalSearch(e.target.value)}
+                onFocus={() => searchQuery.length >= 2 && setShowResults(true)}
+              />
+              {isSearching ? (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-500 animate-spin" size={14} />
+              ) : searchQuery && (
+                <button onClick={() => {setSearchQuery(''); setSearchResults([]);}} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X size={14} />
+                </button>
+              )}
+            </div>
 
           {/* HASIL PENCARIAN DROPDOWN */}
           {showResults && (
@@ -293,8 +295,8 @@ export default function Header() {
                           {result.icon}
                         </div>
                         <div>
-                            <p className="text-[11px] font-bold text-slate-800 line-clamp-1">{result.label}</p>
-                            <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">
+                            <p className="text-[11px] font-bold text-slate-900 line-clamp-1">{result.label}</p>
+                            <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest">
                               {result.type} {result.subLabel ? `• ${result.subLabel}` : ''}
                             </p>
                           </div>
